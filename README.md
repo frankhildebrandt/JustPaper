@@ -6,7 +6,7 @@ Open a single note, or a folder as a project. Then jump with **⌘P** / **Ctrl+P
 
 ## Install
 
-Release binaries are published for **macOS** (Apple Silicon and Intel), **Windows**, **Ubuntu** (`.deb`), and generic Linux (**AppImage**, also the Arch path).
+Release binaries are published for **macOS** (Apple Silicon), **Windows**, **Ubuntu** (`.deb`), and generic Linux (**AppImage**, also the Arch path).
 
 ### macOS (Homebrew Cask)
 
@@ -15,7 +15,7 @@ brew tap frankhildebrandt/justpaper
 brew install --cask justpaper
 ```
 
-Or download the `.dmg` from [Releases](https://github.com/frankhildebrandt/JustPaper/releases). Unsigned builds need a right-click → **Open** the first time.
+Or download the `.dmg` from [Releases](https://github.com/frankhildebrandt/JustPaper/releases). macOS builds are ad-hoc signed; first open is right-click → **Open**. Homebrew strips quarantine for you.
 
 ### Ubuntu
 

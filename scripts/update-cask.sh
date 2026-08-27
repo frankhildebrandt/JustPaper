@@ -8,30 +8,23 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-gh release download "v${version}" --repo "$repo" --pattern "*.dmg" --dir "$work"
+gh release download "v${version}" --repo "$repo" --pattern "*_aarch64.dmg" --dir "$work"
 
 arm_dmg="$(find "$work" -name "*_aarch64.dmg" | head -n 1)"
-intel_dmg="$(find "$work" \( -name "*_x64.dmg" -o -name "*_x86_64.dmg" \) | head -n 1)"
-if [[ -z "$arm_dmg" || -z "$intel_dmg" ]]; then
-  echo "expected aarch64 and x64/x86_64 dmg assets, got:" >&2
+if [[ -z "$arm_dmg" ]]; then
+  echo "expected an aarch64 dmg asset, got:" >&2
   ls -la "$work" >&2
   exit 1
 fi
 
 arm_sha="$(shasum -a 256 "$arm_dmg" | awk '{print $1}')"
-intel_sha="$(shasum -a 256 "$intel_dmg" | awk '{print $1}')"
-intel_arch="x64"
-[[ "$intel_dmg" == *x86_64* ]] && intel_arch="x86_64"
 
 cat > "$root/Casks/justpaper.rb" <<RUBY
 cask "justpaper" do
-  arch arm: "aarch64", intel: "${intel_arch}"
-
   version "${version}"
-  sha256 arm:   "${arm_sha}",
-         intel: "${intel_sha}"
+  sha256 "${arm_sha}"
 
-  url "https://github.com/${repo}/releases/download/v#{version}/JustPaper_#{version}_#{arch}.dmg",
+  url "https://github.com/${repo}/releases/download/v#{version}/JustPaper_#{version}_aarch64.dmg",
       verified: "github.com/${repo}/"
   name "JustPaper"
   desc "Frameless typewriter on a sheet of paper"
@@ -43,6 +36,7 @@ cask "justpaper" do
   end
 
   depends_on macos: ">= :high_sierra"
+  depends_on arch: :arm64
 
   app "JustPaper.app"
 

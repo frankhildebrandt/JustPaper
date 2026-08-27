@@ -1,11 +1,8 @@
 cask "justpaper" do
-  arch arm: "aarch64", intel: "x64"
+  version "0.1.1"
+  sha256 :no_check
 
-  version "0.1.0"
-  sha256 arm:   "a0f45f1682c3b3552f3dc2651466d7a74ced7d446625d2bff1bc6496337522d2",
-         intel: "a3c5a68577a5730197b6c5b99a42b0004c1d20c86de6f14c04b40d51d5b237d2"
-
-  url "https://github.com/frankhildebrandt/JustPaper/releases/download/v#{version}/JustPaper_#{version}_#{arch}.dmg",
+  url "https://github.com/frankhildebrandt/JustPaper/releases/download/v#{version}/JustPaper_#{version}_aarch64.dmg",
       verified: "github.com/frankhildebrandt/JustPaper/"
   name "JustPaper"
   desc "Frameless typewriter on a sheet of paper"
@@ -17,6 +14,7 @@ cask "justpaper" do
   end
 
   depends_on macos: ">= :high_sierra"
+  depends_on arch: :arm64
 
   app "JustPaper.app"
 

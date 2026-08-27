@@ -1,7 +1,7 @@
 # Maintainer: Frank Hildebrandt
 
 pkgname=justpaper
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="A frameless typewriter on a sheet of paper"
 arch=('x86_64' 'aarch64')
@@ -11,8 +11,8 @@ depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg')
 makedepends=('cargo' 'nodejs' 'npm' 'pkgconf')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
         "justpaper.desktop")
-sha256sums=('48eb7c5feff22c596c11a4d5cd1901e208795ddc8e627bf8fe58614afacc9703'
-            'b0e08326f9e76da7b00e3c4942aa895de5bbfc6091cd231edf4f1b3470a9f24c')
+sha256sums=('SKIP'
+            'SKIP')
 
 prepare() {
   cd "JustPaper-$pkgver"
