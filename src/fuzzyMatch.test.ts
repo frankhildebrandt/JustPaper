@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyMatch } from "./fuzzyMatch";
+import { filterByQuery, fuzzyMatch } from "./fuzzyMatch";
 
 describe("fuzzyMatch", () => {
   const files = ["Hello.md", "folder/Note.md", "drafts/ideas.txt"];
@@ -21,5 +21,31 @@ describe("fuzzyMatch", () => {
       "Note.md",
       "a/Note.md",
     ]);
+  });
+});
+
+describe("filterByQuery", () => {
+  const items = [
+    { title: "Later.md", detail: "recent" },
+    { title: "Earlier.md", detail: "older note" },
+    { title: "Other.txt", detail: "skip" },
+  ];
+
+  it("returns items in original order when the query is empty", () => {
+    expect(filterByQuery(items, "", (item) => item.title)).toEqual(items);
+  });
+
+  it("keeps original order among subsequence matches", () => {
+    expect(
+      filterByQuery(items, "er.md", (item) => item.title).map((item) => item.title),
+    ).toEqual(["Later.md", "Earlier.md"]);
+  });
+
+  it("is case-insensitive and searches the haystack", () => {
+    expect(
+      filterByQuery(items, "OLDER", (item) => `${item.title} ${item.detail}`).map(
+        (item) => item.title,
+      ),
+    ).toEqual(["Earlier.md"]);
   });
 });

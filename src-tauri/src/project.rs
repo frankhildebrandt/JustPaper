@@ -13,6 +13,12 @@ pub struct SearchHit {
     text: String,
 }
 
+#[derive(Serialize)]
+pub struct ProjectNote {
+    path: String,
+    content: String,
+}
+
 /**
  * Lists project-relative markdown and text files under `root`.
  */
@@ -76,6 +82,30 @@ pub fn search_project(root: String, query: String) -> Result<Vec<SearchHit>, Str
     Ok(hits)
 }
 
+/**
+ * Reads project-relative note contents under `root`, skipping oversized files.
+ */
+#[tauri::command]
+pub fn read_project_notes(root: String) -> Result<Vec<ProjectNote>, String> {
+    let files = list_project_files(root.clone())?;
+    let root = PathBuf::from(root);
+    let mut notes = Vec::new();
+    for relative in files {
+        let absolute = root.join(&relative);
+        let Ok(content) = std::fs::read_to_string(&absolute) else {
+            continue;
+        };
+        if content.len() > MAX_FILE_BYTES {
+            continue;
+        }
+        notes.push(ProjectNote {
+            path: relative,
+            content,
+        });
+    }
+    Ok(notes)
+}
+
 fn is_note(path: &Path) -> bool {
     match path
         .extension()
@@ -137,6 +167,18 @@ mod tests {
             assert_eq!(hits.len(), 1);
             assert_eq!(hits[0].path, "sub/Note.txt");
             assert_eq!(hits[0].line, 1);
+        });
+    }
+
+    #[test]
+    fn reads_note_contents_and_skips_non_notes() {
+        with_vault(|dir| {
+            let notes = read_project_notes(dir.to_string_lossy().into_owned()).unwrap();
+            assert_eq!(notes.len(), 2);
+            assert_eq!(notes[0].path, "Hello.md");
+            assert_eq!(notes[0].content, "hello world\nsecond");
+            assert_eq!(notes[1].path, "sub/Note.txt");
+            assert_eq!(notes[1].content, "needle here");
         });
     }
 }

@@ -24,7 +24,13 @@ import {
   renamePath,
   untitledCreatePath,
 } from "./filename";
-import { listProjectFiles, searchProject, type SearchHit } from "./projectIndex";
+import {
+  listProjectFiles,
+  readProjectNotes,
+  searchProject,
+  type ProjectNote,
+  type SearchHit,
+} from "./projectIndex";
 import {
   parseRecentFiles,
   serializeRecentFiles,
@@ -54,7 +60,7 @@ const FILE_FILTERS = [
 ];
 const DOCUMENT_START_LINE = 1;
 
-export type { SearchHit };
+export type { SearchHit, ProjectNote };
 
 export type DocumentContent = {
   getText: () => string;
@@ -78,6 +84,7 @@ export type DocumentBinding = {
   openProjectFile: (relativePath: string, caretLine?: number) => Promise<void>;
   followWiki: (target: string) => Promise<void>;
   listFiles: () => Promise<string[]>;
+  readNotes: () => Promise<ProjectNote[]>;
   search: (query: string) => Promise<SearchHit[]>;
   path: () => string | null;
   projectRoot: () => string | null;
@@ -449,6 +456,13 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return listProjectFiles(session.projectRoot);
   };
 
+  const readNotes = async (): Promise<ProjectNote[]> => {
+    if (session.projectRoot === null) {
+      return [];
+    }
+    return readProjectNotes(session.projectRoot);
+  };
+
   const search = async (query: string): Promise<SearchHit[]> => {
     if (session.projectRoot === null) {
       return [];
@@ -541,6 +555,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     openProjectFile,
     followWiki,
     listFiles,
+    readNotes,
     search,
     path: () => session.path,
     projectRoot: () => session.projectRoot,

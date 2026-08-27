@@ -20,6 +20,7 @@
     "fs:allow-create",
     "allow-list-project-files",
     "allow-search-project",
+    "allow-read-project-notes",
     {
       "identifier": "fs:scope",
       "allow": [{ "path": "$HOME/**" }]

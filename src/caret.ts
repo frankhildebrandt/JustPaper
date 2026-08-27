@@ -19,6 +19,20 @@ export function offsetAtLine(text: string, line: number): number {
 }
 
 /**
+ * Returns the 1-based line that contains `offset`.
+ */
+export function lineAtOffset(text: string, offset: number): number {
+  const end = Math.min(Math.max(offset, 0), text.length);
+  let line = 1;
+  for (let i = 0; i < end; i++) {
+    if (text[i] === "\n") {
+      line += 1;
+    }
+  }
+  return line;
+}
+
+/**
  * Returns how many visual lines Page Up/Down should move, overlapping one line.
  */
 export function linesPerPage(

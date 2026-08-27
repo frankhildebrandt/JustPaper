@@ -22,6 +22,23 @@ export function fuzzyMatch(
     .map((entry) => entry.path);
 }
 
+/**
+ * Filters `items` by a fuzzy subsequence, preserving original order.
+ */
+export function filterByQuery<T>(
+  items: readonly T[],
+  query: string,
+  haystack: (item: T) => string,
+): T[] {
+  if (query.length === 0) {
+    return [...items];
+  }
+  const needle = query.toLowerCase();
+  return items.filter((item) =>
+    isSubsequence(haystack(item).toLowerCase(), needle),
+  );
+}
+
 function matchScore(path: string, needle: string): number | undefined {
   const haystack = path.toLowerCase();
   if (!isSubsequence(haystack, needle)) {

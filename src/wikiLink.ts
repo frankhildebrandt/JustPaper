@@ -1,8 +1,28 @@
+import { lineAtOffset } from "./caret";
+
 export type WikiLink = {
   target: string;
   alias: string | undefined;
   from: number;
   to: number;
+};
+
+export type OutgoingWikiLink = {
+  target: string;
+  alias: string | undefined;
+  path: string | undefined;
+};
+
+export type IncomingWikiLink = {
+  path: string;
+  line: number;
+  text: string;
+  target: string;
+};
+
+export type NoteContent = {
+  path: string;
+  content: string;
 };
 
 /**
@@ -68,6 +88,64 @@ export function wikiLinksIn(source: string): WikiLink[] {
     cursor = link.to;
   }
   return links;
+}
+
+/**
+ * Returns unique outgoing wiki targets in first-occurrence order.
+ */
+export function outgoingWikiLinks(
+  source: string,
+  files: readonly string[],
+): OutgoingWikiLink[] {
+  const seen = new Set<string>();
+  const outgoing: OutgoingWikiLink[] = [];
+  for (const link of wikiLinksIn(source)) {
+    const key = link.target.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    outgoing.push({
+      target: link.target,
+      alias: link.alias,
+      path: resolveWikiLink(link.target, files),
+    });
+  }
+  return outgoing;
+}
+
+/**
+ * Returns wiki links in other notes that resolve to `currentRelative`.
+ */
+export function incomingWikiLinks(
+  currentRelative: string,
+  notes: readonly NoteContent[],
+  files: readonly string[],
+): IncomingWikiLink[] {
+  const incoming: IncomingWikiLink[] = [];
+  for (const note of notes) {
+    if (note.path === currentRelative) {
+      continue;
+    }
+    for (const link of wikiLinksIn(note.content)) {
+      if (resolveWikiLink(link.target, files) !== currentRelative) {
+        continue;
+      }
+      incoming.push({
+        path: note.path,
+        line: lineAtOffset(note.content, link.from),
+        text: lineContaining(note.content, link.from),
+        target: link.target,
+      });
+    }
+  }
+  return incoming;
+}
+
+function lineContaining(source: string, offset: number): string {
+  const from = source.lastIndexOf("\n", Math.max(offset - 1, 0)) + 1;
+  const to = source.indexOf("\n", offset);
+  return source.slice(from, to === -1 ? source.length : to);
 }
 
 /**

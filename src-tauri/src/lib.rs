@@ -8,6 +8,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             project::list_project_files,
             project::search_project,
+            project::read_project_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

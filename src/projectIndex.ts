@@ -6,6 +6,11 @@ export type SearchHit = {
   text: string;
 };
 
+export type ProjectNote = {
+  path: string;
+  content: string;
+};
+
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -31,4 +36,14 @@ export async function searchProject(
     return [];
   }
   return invoke<SearchHit[]>("search_project", { root, query });
+}
+
+/**
+ * Reads note contents under `root`.
+ */
+export async function readProjectNotes(root: string): Promise<ProjectNote[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invoke<ProjectNote[]>("read_project_notes", { root });
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { linesPerPage, offsetAfterPage, offsetAtLine } from "./caret";
+import {
+  lineAtOffset,
+  linesPerPage,
+  offsetAfterPage,
+  offsetAtLine,
+} from "./caret";
 
 describe("offsetAtLine", () => {
   it("puts the caret at the start of a 1-based line", () => {
@@ -10,6 +15,19 @@ describe("offsetAtLine", () => {
 
   it("clamps past the last line to the end of the document", () => {
     expect(offsetAtLine("a\nb", 9)).toBe(3);
+  });
+});
+
+describe("lineAtOffset", () => {
+  it("returns the 1-based line that contains the offset", () => {
+    expect(lineAtOffset("a\nb\nc", 0)).toBe(1);
+    expect(lineAtOffset("a\nb\nc", 2)).toBe(2);
+    expect(lineAtOffset("a\nb\nc", 4)).toBe(3);
+  });
+
+  it("counts a newline as the start of the next line", () => {
+    expect(lineAtOffset("a\nb", 1)).toBe(1);
+    expect(lineAtOffset("a\nb", 2)).toBe(2);
   });
 });
 

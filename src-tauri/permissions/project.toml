@@ -7,3 +7,8 @@ commands.allow = ["list_project_files"]
 identifier = "allow-search-project"
 description = "Search markdown and text file contents in a project folder."
 commands.allow = ["search_project"]
+
+[[permission]]
+identifier = "allow-read-project-notes"
+description = "Read markdown and text file contents in a project folder."
+commands.allow = ["read_project_notes"]

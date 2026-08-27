@@ -6,15 +6,19 @@ import "./paper.css";
 import "./markdown.css";
 import "./chrome.css";
 import { bindAppMenu } from "./appMenu";
+import { offsetAtLine } from "./caret";
 import { bindDocument } from "./document";
 import { bindFilenameBar } from "./filenameBar";
-import { fuzzyMatch } from "./fuzzyMatch";
+import { filterByQuery, fuzzyMatch } from "./fuzzyMatch";
 import { bindHighlightMode } from "./highlightMode";
 import { bindPalette } from "./palette";
 import { bindParagraphNav } from "./paragraphNav";
 import { bindParserMode } from "./parserMode";
+import { recentFileLabels } from "./recentFiles";
+import { searchLines } from "./searchLines";
 import { bindSettings } from "./settings";
 import { bindViewMode, textareaLayoutHost } from "./viewMode";
+import { incomingWikiLinks, outgoingWikiLinks } from "./wikiLink";
 import {
   bindFullscreenClass,
   bindTitleDoubleClick,
@@ -28,6 +32,14 @@ function requiredElement<T extends HTMLElement>(id: string): T {
     throw new Error(`Missing required element #${id}`);
   }
   return element as T;
+}
+
+function relativeFromRoot(root: string, path: string): string | undefined {
+  const prefix = `${root.replace(/\/+$/, "")}/`;
+  if (!path.startsWith(prefix)) {
+    return undefined;
+  }
+  return path.slice(prefix.length);
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -134,9 +146,108 @@ window.addEventListener("DOMContentLoaded", () => {
       },
     });
   };
+  const jumpOutgoing = (): void => {
+    if (paperDoc.projectRoot() === null) {
+      return;
+    }
+    void paperDoc.listFiles().then((files) => {
+      const links = outgoingWikiLinks(parser.getDocument(), files).map(
+        (link) => ({
+          id: link.target,
+          title: link.alias ?? link.target,
+          detail: link.path,
+        }),
+      );
+      palette.open({
+        placeholder: "Links im Dokument",
+        load: (query) =>
+          filterByQuery(
+            links,
+            query,
+            (item) => `${item.title} ${item.detail ?? item.id}`,
+          ),
+        onPick: (item) => {
+          void paperDoc.followWiki(item.id);
+        },
+      });
+    });
+  };
+  const jumpIncoming = (): void => {
+    const root = paperDoc.projectRoot();
+    const path = paperDoc.path();
+    if (root === null || path === null) {
+      return;
+    }
+    const current = relativeFromRoot(root, path);
+    if (current === undefined) {
+      return;
+    }
+    void Promise.all([paperDoc.listFiles(), paperDoc.readNotes()]).then(
+      ([files, notes]) => {
+        const hits = incomingWikiLinks(current, notes, files).map((hit) => ({
+          id: `${hit.path}:${hit.line}`,
+          title: `${hit.path}:${hit.line}`,
+          detail: hit.text.trim(),
+        }));
+        palette.open({
+          placeholder: "Eingehende Links",
+          load: (query) =>
+            filterByQuery(
+              hits,
+              query,
+              (item) => `${item.title} ${item.detail ?? ""}`,
+            ),
+          onPick: (item) => {
+            const split = item.id.lastIndexOf(":");
+            const relative = item.id.slice(0, split);
+            const line = Number(item.id.slice(split + 1));
+            void paperDoc.openProjectFile(relative, line);
+          },
+        });
+      },
+    );
+  };
+  const lastOpened = (): void => {
+    const paths = paperDoc.recents();
+    const labels = recentFileLabels(paths);
+    const items = paths.map((path, index) => ({
+      id: path,
+      title: labels[index] ?? path,
+    }));
+    palette.open({
+      placeholder: "Zuletzt geöffnet",
+      load: (query) =>
+        filterByQuery(items, query, (item) => `${item.title} ${item.id}`),
+      onPick: (item) => {
+        void paperDoc.openRecent(item.id);
+      },
+    });
+  };
+  const findInDocument = (): void => {
+    palette.open({
+      placeholder: "Im Dokument suchen",
+      load: (query) =>
+        searchLines(parser.getDocument(), query).map((hit) => ({
+          id: String(hit.line),
+          title: `Zeile ${hit.line}`,
+          detail: hit.text.trim(),
+        })),
+      onPick: (item) => {
+        parser.setCaretOffset(
+          offsetAtLine(parser.getDocument(), Number(item.id)),
+        );
+        parser.revealCaret();
+        parser.focus();
+      },
+    });
+  };
   void bindAppMenu(view, parser, highlight, paragraphNav, paperDoc, {
     quickOpen,
     findInProject,
+    jumpOutgoing,
+    jumpIncoming,
+    lastOpened,
+    findInDocument,
   }, settings);
   bindWindowChrome(document.documentElement, requiredElement("traffic-lights"), {
     reveal: [requiredElement("filename-peek")],

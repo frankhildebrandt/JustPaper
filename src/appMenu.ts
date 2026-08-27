@@ -44,6 +44,10 @@ function isTauriRuntime(): boolean {
 export type ProjectCommands = {
   quickOpen: () => void;
   findInProject: () => void;
+  jumpOutgoing: () => void;
+  jumpIncoming: () => void;
+  lastOpened: () => void;
+  findInDocument: () => void;
 };
 
 /**
@@ -136,6 +140,32 @@ async function fileMenuItems(
       enabled: inProject,
       action: () => {
         project.findInProject();
+      },
+    }),
+    await MenuItem.new({
+      id: "file-jump-outgoing",
+      text: "Ausgehende Links",
+      accelerator: "CmdOrCtrl+J",
+      enabled: inProject,
+      action: () => {
+        project.jumpOutgoing();
+      },
+    }),
+    await MenuItem.new({
+      id: "file-jump-incoming",
+      text: "Eingehende Links",
+      accelerator: "Shift+CmdOrCtrl+J",
+      enabled: inProject,
+      action: () => {
+        project.jumpIncoming();
+      },
+    }),
+    await MenuItem.new({
+      id: "file-last-opened",
+      text: "Zuletzt geöffnet",
+      accelerator: "CmdOrCtrl+E",
+      action: () => {
+        project.lastOpened();
       },
     }),
     await PredefinedMenuItem.new({ item: "Separator" }),
@@ -462,6 +492,15 @@ export async function bindAppMenu(
         await PredefinedMenuItem.new({ item: "Copy" }),
         await PredefinedMenuItem.new({ item: "Paste" }),
         await PredefinedMenuItem.new({ item: "SelectAll" }),
+        await PredefinedMenuItem.new({ item: "Separator" }),
+        await MenuItem.new({
+          id: "edit-find-in-document",
+          text: "Im Dokument suchen",
+          accelerator: "CmdOrCtrl+F",
+          action: () => {
+            project.findInDocument();
+          },
+        }),
       ],
     });
     const viewSubmenu = await Submenu.new({
