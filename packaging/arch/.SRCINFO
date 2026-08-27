@@ -1,0 +1,22 @@
+pkgbase = justpaper
+	pkgdesc = A frameless typewriter on a sheet of paper
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/frankhildebrandt/JustPaper
+	arch = x86_64
+	arch = aarch64
+	license = AGPL-3.0-only
+	makedepends = cargo
+	makedepends = nodejs
+	makedepends = npm
+	makedepends = pkgconf
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = libayatana-appindicator
+	depends = librsvg
+	source = justpaper-0.1.0.tar.gz::https://github.com/frankhildebrandt/JustPaper/archive/refs/tags/v0.1.0.tar.gz
+	source = justpaper.desktop
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = justpaper

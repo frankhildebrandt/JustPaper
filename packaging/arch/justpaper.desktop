@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=JustPaper
+Comment=A frameless typewriter on a sheet of paper
+Exec=justpaper
+Icon=justpaper
+Terminal=false
+Type=Application
+Categories=Office;TextEditor;
+StartupWMClass=justpaper

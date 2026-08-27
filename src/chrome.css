@@ -1,0 +1,57 @@
+.window-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  width: var(--margin-x);
+  height: 40px;
+  padding: 0 12px;
+  pointer-events: none;
+}
+
+.title-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  height: 16px;
+}
+
+.traffic-lights {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.traffic-lights.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.light {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: default;
+  appearance: none;
+}
+
+.light.close {
+  background: #ff5f57;
+}
+
+.light.minimize {
+  background: #febc2e;
+}
+
+.light.zoom {
+  background: #28c840;
+}

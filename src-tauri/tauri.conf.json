@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "JustPaper",
+  "version": "0.1.0",
+  "identifier": "com.justpaper.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "JustPaper",
+        "width": 720,
+        "height": 960,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "windowEffects": {
+          "effects": [],
+          "radius": 16
+        }
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "copyright": "Copyright (C) 2026 Frank Hildebrandt",
+    "category": "Productivity",
+    "shortDescription": "A frameless typewriter on a sheet of paper",
+    "longDescription": "JustPaper is a quiet markdown writing app: one sheet of paper, local files, and an optional project folder with palettes and wikilinks.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

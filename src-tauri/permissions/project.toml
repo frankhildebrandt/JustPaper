@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-list-project-files"
+description = "List markdown and text files in a project folder."
+commands.allow = ["list_project_files"]
+
+[[permission]]
+identifier = "allow-search-project"
+description = "Search markdown and text file contents in a project folder."
+commands.allow = ["search_project"]

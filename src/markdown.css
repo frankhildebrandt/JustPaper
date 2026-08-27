@@ -1,0 +1,87 @@
+.md-mark {
+  color: color-mix(in srgb, var(--ink) 42%, transparent);
+}
+
+.md-atx {
+  position: absolute;
+  right: 100%;
+  color: color-mix(in srgb, var(--ink) 42%, transparent);
+  white-space: pre;
+}
+
+.md-strong {
+  font-weight: 700;
+}
+
+.md-em {
+  font-style: italic;
+}
+
+.md-code {
+  font-family: "Courier Prime", ui-monospace, "Courier New", monospace;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.md-wiki {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.highlight-dim,
+.highlight-dim * {
+  color: var(--ink-muted);
+}
+
+.markdown-host .cm-line.md-h1,
+.markdown-host .cm-line.md-h2,
+.markdown-host .cm-line.md-h3,
+.markdown-host .cm-line.md-h4,
+.markdown-host .cm-line.md-h5,
+.markdown-host .cm-line.md-h6 {
+  position: relative;
+  font-weight: 700;
+}
+
+.markdown-host .cm-line.md-h1 {
+  font-size: var(--md-h1-font);
+  line-height: var(--md-h1-line);
+  padding-top: var(--md-h1-before);
+  padding-bottom: var(--md-h1-after);
+}
+
+.markdown-host .cm-line.md-h2 {
+  font-size: var(--md-h2-font);
+  line-height: var(--md-h2-line);
+  padding-top: var(--md-h2-before);
+  padding-bottom: var(--md-h2-after);
+}
+
+.markdown-host .cm-line.md-h3 {
+  font-size: var(--md-h3-font);
+  line-height: var(--md-h3-line);
+  padding-top: var(--md-h3-before);
+  padding-bottom: var(--md-h3-after);
+}
+
+.markdown-host .cm-line.md-h4 {
+  font-size: var(--md-h4-font);
+  line-height: var(--md-h4-line);
+  padding-top: var(--md-h4-before);
+  padding-bottom: var(--md-h4-after);
+}
+
+.markdown-host .cm-line.md-h5 {
+  font-size: var(--md-h5-font);
+  line-height: var(--md-h5-line);
+  padding-top: var(--md-h5-before);
+  padding-bottom: var(--md-h5-after);
+}
+
+.markdown-host .cm-line.md-h6 {
+  font-size: var(--md-h6-font);
+  line-height: var(--md-h6-line);
+  padding-top: var(--md-h6-before);
+  padding-bottom: var(--md-h6-after);
+}

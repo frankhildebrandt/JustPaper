@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JustPaper</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <div class="paper" id="paper">
+      <div class="title-drag" id="title-drag" data-tauri-drag-region></div>
+      <div class="window-chrome">
+        <div class="traffic-lights" id="traffic-lights">
+          <button type="button" class="light close" id="window-close" aria-label="Close"></button>
+          <button type="button" class="light minimize" id="window-minimize" aria-label="Minimize"></button>
+          <button type="button" class="light zoom" id="window-zoom" aria-label="Zoom"></button>
+        </div>
+      </div>
+      <div class="sheet">
+        <div class="margin margin-left" data-tauri-drag-region></div>
+        <input
+          id="filename-peek"
+          class="filename filename-peek"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="Filename"
+        />
+        <input
+          id="filename"
+          class="filename filename-flow"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="Filename"
+        />
+        <div id="highlight" class="highlight-layer" aria-hidden="true" hidden></div>
+        <textarea id="editor" spellcheck="false" autocomplete="off"></textarea>
+        <div id="markdown" class="markdown-host" hidden></div>
+        <div class="margin margin-right" data-tauri-drag-region></div>
+        <div id="paragraph-nav" class="paragraph-nav"></div>
+        <div id="palette" class="palette" hidden>
+          <input
+            id="palette-query"
+            class="palette-query"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <ul id="palette-results" class="palette-results"></ul>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

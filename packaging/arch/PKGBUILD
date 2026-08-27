@@ -1,0 +1,37 @@
+# Maintainer: Frank Hildebrandt
+
+pkgname=justpaper
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A frameless typewriter on a sheet of paper"
+arch=('x86_64' 'aarch64')
+url="https://github.com/frankhildebrandt/JustPaper"
+license=('AGPL-3.0-only')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg')
+makedepends=('cargo' 'nodejs' 'npm' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+        "justpaper.desktop")
+sha256sums=('SKIP'
+            'SKIP')
+
+prepare() {
+  cd "JustPaper-$pkgver"
+  export CARGO_HOME="$srcdir/cargo"
+  npm ci
+}
+
+build() {
+  cd "JustPaper-$pkgver"
+  export CARGO_HOME="$srcdir/cargo"
+  npm run build
+  cargo build --locked --release --manifest-path src-tauri/Cargo.toml
+}
+
+package() {
+  cd "JustPaper-$pkgver"
+  install -Dm755 src-tauri/target/release/justpaper "$pkgdir/usr/bin/justpaper"
+  install -Dm644 "$srcdir/justpaper.desktop" "$pkgdir/usr/share/applications/justpaper.desktop"
+  install -Dm644 src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/justpaper.png"
+  install -Dm644 src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/justpaper.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
