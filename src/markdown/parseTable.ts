@@ -108,11 +108,62 @@ function cellsOf(source: string, row: TableRowRange): string[] {
   return splitCells(source.slice(row.from, row.to)).map((cell) => cell.trim());
 }
 
-function splitCells(line: string): string[] {
-  const raw = line.split("|");
-  const start = line.startsWith("|") ? 1 : 0;
-  const end = line.endsWith("|") ? raw.length - 1 : raw.length;
-  return raw.slice(start, end);
+/**
+ * Indices of `|` that act as GFM cell separators in `line`.
+ * Skips pipes inside `[[wiki|alias]]`, inline `` `code` ``, and `\|` escapes.
+ */
+export function structuralPipeIndices(line: string): number[] {
+  const indices: number[] = [];
+  let index = 0;
+  while (index < line.length) {
+    if (line[index] === "\\" && index + 1 < line.length) {
+      index += 2;
+      continue;
+    }
+    if (line.startsWith("[[", index)) {
+      const close = line.indexOf("]]", index + 2);
+      if (close === -1) {
+        index += 1;
+        continue;
+      }
+      index = close + 2;
+      continue;
+    }
+    if (line[index] === "`") {
+      const close = line.indexOf("`", index + 1);
+      if (close === -1) {
+        index += 1;
+        continue;
+      }
+      index = close + 1;
+      continue;
+    }
+    if (line[index] === "|") {
+      indices.push(index);
+    }
+    index += 1;
+  }
+  return indices;
+}
+
+/**
+ * Splits a table row into cell strings, ignoring pipes inside wiki links / code.
+ */
+export function splitCells(line: string): string[] {
+  const pipes = structuralPipeIndices(line);
+  const raw: string[] = [];
+  let start = 0;
+  for (const pipe of pipes) {
+    raw.push(line.slice(start, pipe));
+    start = pipe + 1;
+  }
+  raw.push(line.slice(start));
+  const from = pipes[0] === 0 ? 1 : 0;
+  const to =
+    pipes.length > 0 && pipes[pipes.length - 1] === line.length - 1
+      ? raw.length - 1
+      : raw.length;
+  return raw.slice(from, to);
 }
 
 function cellsIn(
@@ -120,7 +171,7 @@ function cellsIn(
   line: string,
 ): { from: number; to: number }[] {
   const cells: { from: number; to: number }[] = [];
-  let offset = line.startsWith("|") ? 1 : 0;
+  let offset = structuralPipeIndices(line)[0] === 0 ? 1 : 0;
   const parts = splitCells(line);
   for (const part of parts) {
     cells.push({ from: lineFrom + offset, to: lineFrom + offset + part.length });
@@ -166,10 +217,8 @@ function pipesIn(
 ): { from: number; to: number }[] {
   const pipes: { from: number; to: number }[] = [];
   for (const line of lines) {
-    for (let index = 0; index < line.text.length; index += 1) {
-      if (line.text[index] === "|") {
-        pipes.push({ from: line.from + index, to: line.from + index + 1 });
-      }
+    for (const index of structuralPipeIndices(line.text)) {
+      pipes.push({ from: line.from + index, to: line.from + index + 1 });
     }
   }
   return pipes;

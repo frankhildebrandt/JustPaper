@@ -345,11 +345,19 @@ const paperTheme = EditorView.theme({
 
 export type MarkdownSurface = "markdownEdit" | "markdownView";
 
+export type CaretScreenBox = {
+  left: number;
+  bottom: number;
+};
+
 export type MarkdownEditor = {
   getDocument: () => string;
   setDocument: (text: string, caretLine?: number) => void;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
+  isSelectionEmpty: () => boolean;
+  caretScreenBox: () => CaretScreenBox | null;
+  replaceRange: (from: number, to: number, text: string) => void;
   offsetAtClientPoint: (clientX: number, clientY: number) => number | undefined;
   revealCaret: () => void;
   setSurface: (surface: MarkdownSurface) => void;
@@ -357,6 +365,7 @@ export type MarkdownEditor = {
   setFeatures: (features: MarkdownFeatures) => void;
   setAssetBase: (dir: string | null) => void;
   setGraphic: (enabled: boolean) => void;
+  setLinkHelperKeys: (handler: ((key: string) => boolean) | undefined) => void;
   layoutElement: HTMLElement;
   typewriterTarget: TypewriterTarget;
   onChange: (listener: () => void) => () => void;
@@ -374,6 +383,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
   const caretListeners = new Set<() => void>();
   const changeListeners = new Set<() => void>();
   let wikiFollow: ((target: string) => void) | undefined;
+  let linkHelperKeys: ((key: string) => boolean) | undefined;
 
   const followAt = (current: EditorView, offset: number): boolean => {
     const source = current.state.doc.toString();
@@ -576,6 +586,22 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     window.addEventListener("blur", endSelect);
   };
   view.contentDOM.addEventListener("mousedown", onPointerSelectStart, true);
+  const onLinkHelperKeyDown = (event: KeyboardEvent): void => {
+    if (
+      event.key !== "ArrowUp" &&
+      event.key !== "ArrowDown" &&
+      event.key !== "Enter" &&
+      event.key !== "Escape"
+    ) {
+      return;
+    }
+    if (!linkHelperKeys?.(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  view.contentDOM.addEventListener("keydown", onLinkHelperKeyDown, true);
 
   const typewriterTarget: TypewriterTarget = {
     scrollElement: view.scrollDOM,
@@ -608,6 +634,28 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     setCaretOffset: (offset: number): void => {
       const caret = Math.min(Math.max(offset, 0), view.state.doc.length);
       view.dispatch({ selection: { anchor: caret } });
+    },
+    isSelectionEmpty: (): boolean => view.state.selection.main.empty,
+    caretScreenBox: (): CaretScreenBox | null => {
+      const caret = view.state.selection.main.head;
+      const box =
+        view.coordsAtPos(caret) ??
+        view.coordsAtPos(Math.max(0, caret - 1));
+      if (!box) {
+        return null;
+      }
+      return { left: box.left, bottom: box.bottom };
+    },
+    replaceRange: (from: number, to: number, text: string): void => {
+      const insertFrom = Math.max(0, Math.min(from, view.state.doc.length));
+      const insertTo = Math.max(
+        insertFrom,
+        Math.min(to, view.state.doc.length),
+      );
+      view.dispatch({
+        changes: { from: insertFrom, to: insertTo, insert: text },
+        selection: { anchor: insertFrom + text.length },
+      });
     },
     offsetAtClientPoint: (clientX: number, clientY: number): number | undefined => {
       return view.posAtCoords({ x: clientX, y: clientY }) ?? undefined;
@@ -647,6 +695,9 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     setWikiFollow: (handler): void => {
       wikiFollow = handler;
     },
+    setLinkHelperKeys: (handler): void => {
+      linkHelperKeys = handler;
+    },
     focus: () => {
       view.focus();
     },
@@ -654,6 +705,11 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
       view.contentDOM.removeEventListener(
         "mousedown",
         onPointerSelectStart,
+        true,
+      );
+      view.contentDOM.removeEventListener(
+        "keydown",
+        onLinkHelperKeyDown,
         true,
       );
       document.removeEventListener("selectionchange", onNativeSelectionDrift);
@@ -1159,8 +1215,12 @@ function specToRanges(
       spec.calloutType !== undefined
         ? ` md-callout md-callout-${spec.calloutType}`
         : "";
+    const part =
+      spec.quotePart !== undefined ? ` md-quote-${spec.quotePart}` : "";
     return [
-      Decoration.line({ class: `md-blockquote${callout}` }).range(spec.from),
+      Decoration.line({ class: `md-blockquote${callout}${part}` }).range(
+        spec.from,
+      ),
     ];
   }
   if (spec.kind === "line-todo") {

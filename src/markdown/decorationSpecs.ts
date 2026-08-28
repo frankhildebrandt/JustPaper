@@ -54,6 +54,8 @@ export type DecorationSpec = {
   bodyNodes?: CellNode[][];
   calloutType?: string;
   calloutTitle?: string;
+  /** Position of a quote/callout line within its block (for continuous drawer CSS). */
+  quotePart?: "only" | "first" | "mid" | "last";
   opensSource?: boolean;
 };
 
@@ -161,11 +163,13 @@ export function decorationSpecs(
         });
         continue;
       }
-      for (const line of block.lines) {
+      for (let index = 0; index < block.lines.length; index += 1) {
+        const line = block.lines[index];
         specs.push({
           kind: "line-blockquote",
           from: line.from,
           to: line.to,
+          quotePart: quotePartAt(index, block.lines.length),
           ...(block.callout ? { calloutType: block.callout.type } : {}),
         });
         specs.push({
@@ -466,6 +470,25 @@ function calloutTitle(type: string): string {
   return type.length === 0
     ? "Note"
     : type[0].toUpperCase() + type.slice(1);
+}
+
+/**
+ * Which edge of a multi-line quote/callout this line sits on.
+ */
+function quotePartAt(
+  index: number,
+  lineCount: number,
+): "only" | "first" | "mid" | "last" {
+  if (lineCount <= 1) {
+    return "only";
+  }
+  if (index === 0) {
+    return "first";
+  }
+  if (index === lineCount - 1) {
+    return "last";
+  }
+  return "mid";
 }
 
 function inlineSpecs(

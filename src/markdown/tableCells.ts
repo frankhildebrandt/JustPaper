@@ -5,6 +5,7 @@ import {
 import type { InlineSpan } from "./parse";
 import { parseInlineMarkdown } from "./parse";
 import type { TableRange, TableRowRange } from "./parseTable";
+import { splitCells } from "./parseTable";
 
 export type CellNode =
   | { kind: "text"; text: string }
@@ -96,9 +97,5 @@ function richCells(
 }
 
 function cellTexts(source: string, row: TableRowRange): string[] {
-  const line = source.slice(row.from, row.to);
-  const raw = line.split("|");
-  const start = line.startsWith("|") ? 1 : 0;
-  const end = line.endsWith("|") ? raw.length - 1 : raw.length;
-  return raw.slice(start, end).map((cell) => cell.trim());
+  return splitCells(source.slice(row.from, row.to)).map((cell) => cell.trim());
 }

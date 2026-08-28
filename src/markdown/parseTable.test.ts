@@ -42,4 +42,20 @@ describe("tableGrid", () => {
       rows: [["1", "2"]],
     });
   });
+
+  it("does not treat a wiki-link alias pipe as a cell separator", () => {
+    const source =
+      "| Vendor |\n| --- |\n| [[Hersteller/Arista Networks|Arista Networks]] |";
+    const table = parseTable(source, 0);
+    expect(table).toBeDefined();
+    expect(tableGrid(source, table!)).toEqual({
+      header: ["Vendor"],
+      rows: [["[[Hersteller/Arista Networks|Arista Networks]]"]],
+    });
+    // Alias `|` must not appear in the structural pipe list.
+    const aliasPipe = source.indexOf("|Arista");
+    expect(
+      table!.pipes.some((pipe) => pipe.from === aliasPipe),
+    ).toBe(false);
+  });
 });

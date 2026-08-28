@@ -38,6 +38,10 @@ export type ParserModeBinding = {
   setDocument: (text: string, caretLine?: number) => void;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
+  isSelectionEmpty: () => boolean;
+  caretScreenBox: () => { left: number; bottom: number } | null;
+  replaceRange: (from: number, to: number, text: string) => void;
+  setLinkHelperKeys: (handler: ((key: string) => boolean) | undefined) => void;
   offsetAtClientPoint: (clientX: number, clientY: number) => number | undefined;
   scrollElement: () => HTMLElement;
   onScroll: (listener: () => void) => () => void;
@@ -224,6 +228,30 @@ export function bindParserMode(
     setDocument,
     getCaretOffset,
     setCaretOffset,
+    isSelectionEmpty: (): boolean => {
+      if (mode === "plain") {
+        return textarea.selectionStart === textarea.selectionEnd;
+      }
+      return markdown.isSelectionEmpty();
+    },
+    caretScreenBox: () =>
+      mode === "markdownEdit" ? markdown.caretScreenBox() : null,
+    replaceRange: (from: number, to: number, text: string): void => {
+      if (mode === "plain") {
+        const value = textarea.value;
+        const next =
+          value.slice(0, from) + text + value.slice(to);
+        textarea.value = next;
+        const caret = from + text.length;
+        textarea.setSelectionRange(caret, caret);
+        notifyChange();
+        return;
+      }
+      markdown.replaceRange(from, to, text);
+    },
+    setLinkHelperKeys: (handler): void => {
+      markdown.setLinkHelperKeys(handler);
+    },
     offsetAtClientPoint,
     scrollElement,
     onScroll: (listener: () => void): (() => void) => {

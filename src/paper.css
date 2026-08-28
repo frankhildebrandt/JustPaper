@@ -363,3 +363,62 @@ body {
 .palette-item-detail {
   color: var(--ink-muted);
 }
+
+.link-helper {
+  position: absolute;
+  z-index: 6;
+  max-width: min(28rem, calc(100% - 24px));
+  max-height: 12rem;
+  margin: 0;
+  padding: 4px 0;
+  border-radius: 6px;
+  background: var(--palette);
+  box-shadow: var(--shadow);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.link-helper-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link-helper-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 10px;
+  color: var(--ink);
+  font-family: "Courier Prime", ui-monospace, "Courier New", monospace;
+  font-size: calc(var(--editor-font-size, 16px) * 0.92);
+  line-height: 1.35;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.link-helper-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-helper-item-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+  font-size: calc(var(--editor-font-size, 16px) * 0.72);
+  line-height: 1.3;
+}
+
+.link-helper-item.is-active {
+  color: var(--accent);
+}
+
+.link-helper-item.is-active .link-helper-item-path {
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink-muted));
+}

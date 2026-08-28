@@ -110,13 +110,13 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("> hi"), { showMarks: true }),
     ).toEqual([
-      { kind: "line-blockquote", from: 0, to: 4 },
+      { kind: "line-blockquote", from: 0, to: 4, quotePart: "only" },
       { kind: "mark", from: 0, to: 2 },
     ]);
     expect(
       decorationSpecs(parseMarkdown("> hi"), { showMarks: false }),
     ).toEqual([
-      { kind: "line-blockquote", from: 0, to: 4 },
+      { kind: "line-blockquote", from: 0, to: 4, quotePart: "only" },
       { kind: "hide", from: 0, to: 2 },
     ]);
   });
@@ -423,7 +423,7 @@ describe("decorationSpecs", () => {
         caret: 0,
       }),
     ).toEqual([
-      { kind: "line-blockquote", from: 2, to: 6 },
+      { kind: "line-blockquote", from: 2, to: 6, quotePart: "only" },
       { kind: "hide", from: 2, to: 4 },
     ]);
     const fence = "x\n```\nhi\n```";
@@ -550,12 +550,37 @@ describe("decorationSpecs", () => {
         source,
       }),
     ).toEqual([
-      { kind: "line-blockquote", from: 0, to: 16, calloutType: "info" },
+      {
+        kind: "line-blockquote",
+        from: 0,
+        to: 16,
+        calloutType: "info",
+        quotePart: "first",
+      },
       { kind: "hide", from: 0, to: 2 },
-      { kind: "line-blockquote", from: 17, to: 23, calloutType: "info" },
+      {
+        kind: "line-blockquote",
+        from: 17,
+        to: 23,
+        calloutType: "info",
+        quotePart: "last",
+      },
       { kind: "hide", from: 17, to: 19 },
       { kind: "hide", from: 2, to: 9 },
       { kind: "callout-title", from: 10, to: 16 },
+    ]);
+  });
+
+  it("marks middle callout lines so CSS can stitch a continuous drawer", () => {
+    const source = "> [!todo] Title\n> - one\n> - two\n> - three";
+    const lines = decorationSpecs(parseMarkdown(source), {
+      showMarks: true,
+    }).filter((spec) => spec.kind === "line-blockquote");
+    expect(lines.map((spec) => spec.quotePart)).toEqual([
+      "first",
+      "mid",
+      "mid",
+      "last",
     ]);
   });
 });

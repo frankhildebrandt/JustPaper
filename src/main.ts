@@ -11,10 +11,16 @@ import { bindDocument } from "./document";
 import { bindFilenameBar } from "./filenameBar";
 import { filterByQuery, fuzzyMatch } from "./fuzzyMatch";
 import { bindHighlightMode } from "./highlightMode";
+import { bindLinkHelper, type LinkHelperItem } from "./linkHelper";
 import { bindPalette } from "./palette";
 import { bindParagraphNav } from "./paragraphNav";
 import { bindParserMode } from "./parserMode";
 import { documentDir } from "./markdown/imageSrc";
+import {
+  completedWikiLink,
+  openWikiQuery,
+  wikiInsertTarget,
+} from "./openWikiQuery";
 import { recentFileLabels } from "./recentFiles";
 import { searchLines } from "./searchLines";
 import { bindSettings } from "./settings";
@@ -27,6 +33,7 @@ import {
   bindWindowChrome,
 } from "./windowChrome";
 
+const LINK_HELPER_LIMIT = 10;
 function requiredElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
   if (!element) {
@@ -51,6 +58,7 @@ window.addEventListener("DOMContentLoaded", () => {
     applyHighlightMode: parser.applyHighlightMode,
     onCaretOrDoc: parser.onCaretOrDoc,
   });
+  let syncLinkHelper = (): void => undefined;
   const settings = bindSettings(document.documentElement, {
     fontSize: (size) => {
       view.setFontSize(size);
@@ -60,6 +68,7 @@ window.addEventListener("DOMContentLoaded", () => {
     },
     parserMode: (mode) => {
       parser.setParserMode(mode);
+      syncLinkHelper();
     },
     highlightMode: (mode) => {
       highlight.setHighlightMode(mode);
@@ -106,10 +115,147 @@ window.addEventListener("DOMContentLoaded", () => {
   );
   filename.setPath(paperDoc.path());
   filename.setScroller(view.getHost().layoutElement);
+  let projectFiles: string[] | null = null;
+  let linkHelperFrom: number | undefined;
+  let linkHelperActive = 0;
+  let linkHelperRequest = 0;
+  let linkHelperQuery: string | undefined;
+  let linkHelperDismissedFrom: number | undefined;
+  const pickLinkHelper = (item: LinkHelperItem): void => {
+    if (linkHelperFrom === undefined) {
+      return;
+    }
+    const from = linkHelperFrom;
+    const to = parser.getCaretOffset();
+    linkHelper.hide();
+    linkHelperFrom = undefined;
+    linkHelperDismissedFrom = undefined;
+    parser.replaceRange(
+      from,
+      to,
+      completedWikiLink(wikiInsertTarget(item.id)),
+    );
+  };
+  const linkHelper = bindLinkHelper(
+    requiredElement("link-helper"),
+    requiredElement("link-helper-results"),
+    pickLinkHelper,
+  );
+  const paperEl = requiredElement("paper");
+  const markdownEl = requiredElement("markdown");
+  const anchorFromCaret = (): { left: number; top: number } => {
+    const paperBox = paperEl.getBoundingClientRect();
+    const box = parser.caretScreenBox();
+    if (box) {
+      return {
+        left: box.left - paperBox.left,
+        top: box.bottom - paperBox.top + 4,
+      };
+    }
+    const host = markdownEl.getBoundingClientRect();
+    return {
+      left: Math.max(12, host.left - paperBox.left + 24),
+      top: Math.max(12, host.top - paperBox.top + 48),
+    };
+  };
+  const syncLinkHelperBody = (): void => {
+    if (
+      parser.getParserMode() !== "markdownEdit" ||
+      paperDoc.projectRoot() === null ||
+      !parser.isSelectionEmpty()
+    ) {
+      linkHelper.hide();
+      linkHelperFrom = undefined;
+      linkHelperDismissedFrom = undefined;
+      return;
+    }
+    const source = parser.getDocument();
+    const caret = parser.getCaretOffset();
+    const open = openWikiQuery(source, caret);
+    if (!open) {
+      linkHelper.hide();
+      linkHelperFrom = undefined;
+      linkHelperDismissedFrom = undefined;
+      return;
+    }
+    if (linkHelperDismissedFrom === open.from) {
+      linkHelper.hide();
+      linkHelperFrom = open.from;
+      return;
+    }
+    if (linkHelperFrom !== open.from || linkHelperQuery !== open.query) {
+      linkHelperActive = 0;
+    }
+    linkHelperFrom = open.from;
+    linkHelperQuery = open.query;
+    const request = ++linkHelperRequest;
+    const query = open.query;
+    const apply = (files: string[]): void => {
+      if (request !== linkHelperRequest || linkHelperFrom !== open.from) {
+        return;
+      }
+      const paths = fuzzyMatch(files, query).slice(0, LINK_HELPER_LIMIT);
+      linkHelper.show({
+        items: paths.map((path) => ({ id: path, title: path })),
+        active: linkHelperActive,
+        anchor: anchorFromCaret(),
+      });
+    };
+    if (projectFiles !== null) {
+      apply(projectFiles);
+      return;
+    }
+    void paperDoc.listFiles().then(
+      (files) => {
+        projectFiles = files;
+        apply(files);
+      },
+      () => {
+        projectFiles = [];
+        apply([]);
+      },
+    );
+  };
+  let syncFrame = 0;
+  syncLinkHelper = (): void => {
+    cancelAnimationFrame(syncFrame);
+    syncFrame = requestAnimationFrame(syncLinkHelperBody);
+  };
+  parser.setLinkHelperKeys((key: string): boolean => {
+    if (!linkHelper.isOpen()) {
+      return false;
+    }
+    if (key === "Escape") {
+      linkHelperDismissedFrom = linkHelperFrom;
+      linkHelper.hide();
+      return true;
+    }
+    if (key === "ArrowDown") {
+      linkHelperActive = linkHelper.setActive(linkHelperActive + 1);
+      return true;
+    }
+    if (key === "ArrowUp") {
+      linkHelperActive = linkHelper.setActive(linkHelperActive - 1);
+      return true;
+    }
+    if (key === "Enter") {
+      const item = linkHelper.activeItem();
+      if (!item) {
+        return false;
+      }
+      pickLinkHelper(item);
+      return true;
+    }
+    return false;
+  });
   paperDoc.onSessionChange(() => {
     filename.setPath(paperDoc.path());
     applyAssetBase();
+    projectFiles = null;
+    syncLinkHelper();
   });
+  parser.onCaretOrDoc(syncLinkHelper);
+  parser.onScroll(syncLinkHelper);
   view.onHostChange(() => {
     filename.setScroller(view.getHost().layoutElement);
   });

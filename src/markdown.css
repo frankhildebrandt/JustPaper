@@ -91,6 +91,16 @@
   padding-left: 0.75em;
 }
 
+.cm-line.md-blockquote.md-quote-first,
+.cm-line.md-blockquote.md-quote-only {
+  margin-top: 0.35em;
+}
+
+.cm-line.md-blockquote.md-quote-last,
+.cm-line.md-blockquote.md-quote-only {
+  margin-bottom: 0.35em;
+}
+
 .md-table-header {
   font-weight: 700;
 }
@@ -216,20 +226,60 @@
 .md-callout-title {
   font-weight: 700;
   color: var(--callout-color);
-  margin-bottom: 0.25em;
+  margin: 0 0 0.5em;
+  padding: 0;
+  text-align: left;
+}
+
+.md-callout-body {
+  margin: 0;
+  padding: 0;
+  text-align: left;
 }
 
 .md-callout-body p {
   margin: 0;
+  padding: 0;
+  text-align: left;
 }
 
 .md-callout-body p + p {
   margin-top: 0.25em;
 }
 
-.md-blockquote.md-callout {
-  border-left-color: var(--callout-color);
+/*
+ * Line-decorated callouts: stitch consecutive cm-lines into one drawer.
+ * The widget `.md-callout` rules also match these lines — override card chrome.
+ */
+.cm-line.md-blockquote.md-callout {
+  border-left: 3px solid var(--callout-color);
   background: color-mix(in srgb, var(--callout-color) 10%, transparent);
+  margin-block: 0;
+  border-radius: 0;
+  padding-top: 0.12em;
+  padding-bottom: 0.12em;
+  padding-right: 0.75em;
+}
+
+.cm-line.md-blockquote.md-callout.md-quote-only {
+  margin-block: 0.55em;
+  padding-top: 0.55em;
+  padding-bottom: 0.65em;
+  border-radius: 0 0.25em 0.25em 0;
+}
+
+.cm-line.md-blockquote.md-callout.md-quote-first {
+  margin-top: 0.55em;
+  padding-top: 0.55em;
+  /* Space after the callout headline before body lines. */
+  padding-bottom: 0.45em;
+  border-radius: 0 0.25em 0 0;
+}
+
+.cm-line.md-blockquote.md-callout.md-quote-last {
+  margin-bottom: 0.55em;
+  padding-bottom: 0.65em;
+  border-radius: 0 0 0.25em 0;
 }
 
 .md-callout-note,
