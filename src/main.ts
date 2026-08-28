@@ -14,6 +14,7 @@ import { bindHighlightMode } from "./highlightMode";
 import { bindPalette } from "./palette";
 import { bindParagraphNav } from "./paragraphNav";
 import { bindParserMode } from "./parserMode";
+import { documentDir } from "./markdown/imageSrc";
 import { recentFileLabels } from "./recentFiles";
 import { searchLines } from "./searchLines";
 import { bindSettings } from "./settings";
@@ -63,11 +64,20 @@ window.addEventListener("DOMContentLoaded", () => {
     highlightMode: (mode) => {
       highlight.setHighlightMode(mode);
     },
+    markdownFeatures: (features) => {
+      parser.setMarkdownFeatures(features);
+    },
+    markdownGraphic: (enabled) => {
+      parser.setMarkdownGraphic(enabled);
+    },
   });
   const paragraphNav = bindParagraphNav(requiredElement("paragraph-nav"), {
     getDocument: parser.getDocument,
     getCaretOffset: parser.getCaretOffset,
     setCaretOffset: parser.setCaretOffset,
+    offsetAtClientPoint: parser.offsetAtClientPoint,
+    scrollElement: parser.scrollElement,
+    onScroll: parser.onScroll,
     revealCaret: parser.revealCaret,
     focus: parser.focus,
     onCaretOrDoc: parser.onCaretOrDoc,
@@ -85,6 +95,10 @@ window.addEventListener("DOMContentLoaded", () => {
   parser.setWikiFollow((target) => {
     void paperDoc.followWiki(target);
   });
+  const applyAssetBase = (): void => {
+    parser.setAssetBase(documentDir(paperDoc.path()));
+  };
+  applyAssetBase();
   const filename = bindFilenameBar(
     requiredElement("filename"),
     (name) => paperDoc.rename(name),
@@ -94,6 +108,7 @@ window.addEventListener("DOMContentLoaded", () => {
   filename.setScroller(view.getHost().layoutElement);
   paperDoc.onSessionChange(() => {
     filename.setPath(paperDoc.path());
+    applyAssetBase();
   });
   view.onHostChange(() => {
     filename.setScroller(view.getHost().layoutElement);

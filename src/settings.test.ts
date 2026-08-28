@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_MARKDOWN_FEATURES } from "./markdown/features";
 import {
   DEFAULT_SETTINGS,
   accentHex,
@@ -35,6 +36,27 @@ describe("parseSettings", () => {
       viewMode: "normal",
       parserMode: "markdownEdit",
       highlightMode: "sentence",
+      markdownFeatures: DEFAULT_MARKDOWN_FEATURES,
+      markdownGraphic: false,
+    });
+  });
+
+  it("reads the stored graphic markdown rendering flag", () => {
+    expect(
+      parseSettings(JSON.stringify({ markdownGraphic: true })).markdownGraphic,
+    ).toBe(true);
+  });
+
+  it("reads stored markdown feature flags and fills missing keys", () => {
+    expect(
+      parseSettings(
+        JSON.stringify({
+          markdownFeatures: { table: false, unknown: true },
+        }),
+      ).markdownFeatures,
+    ).toEqual({
+      ...DEFAULT_MARKDOWN_FEATURES,
+      table: false,
     });
   });
 
@@ -63,6 +85,11 @@ describe("serializeSettings", () => {
       viewMode: "normal" as const,
       parserMode: "markdownView" as const,
       highlightMode: "headline" as const,
+      markdownFeatures: {
+        ...DEFAULT_MARKDOWN_FEATURES,
+        image: false,
+      },
+      markdownGraphic: true,
     };
     expect(parseSettings(serializeSettings(settings))).toEqual(settings);
   });

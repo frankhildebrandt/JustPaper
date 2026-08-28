@@ -20,19 +20,26 @@ describe("typewriterFollowAfterGesture", () => {
     );
   });
 
-  it("resumes follow on a left click in the scroller content", () => {
+  it("releases follow on a left click in the scroller content", () => {
+    expect(
+      typewriterFollowAfterGesture("follow", {
+        type: "click",
+        button: 0,
+        onScrollbar: false,
+      }),
+    ).toBe("released");
     expect(
       typewriterFollowAfterGesture("released", {
         type: "click",
         button: 0,
         onScrollbar: false,
       }),
-    ).toBe("follow");
+    ).toBe("released");
   });
 
-  it("does not resume follow on a right click", () => {
+  it("releases follow on a right click", () => {
     expect(
-      typewriterFollowAfterGesture("released", {
+      typewriterFollowAfterGesture("follow", {
         type: "click",
         button: 2,
         onScrollbar: false,
@@ -40,12 +47,12 @@ describe("typewriterFollowAfterGesture", () => {
     ).toBe("released");
   });
 
-  it("stays released when the click lands on the scrollbar", () => {
+  it("releases follow when the pointer presses the scroller content", () => {
     expect(
-      typewriterFollowAfterGesture("released", {
-        type: "click",
+      typewriterFollowAfterGesture("follow", {
+        type: "pointerdown",
         button: 0,
-        onScrollbar: true,
+        onScrollbar: false,
       }),
     ).toBe("released");
   });

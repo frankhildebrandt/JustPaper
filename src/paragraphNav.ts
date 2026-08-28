@@ -2,6 +2,7 @@ import {
   activeParagraphIndex,
   paragraphRanges,
 } from "./highlightRange";
+import { pointerHitsScrollbar } from "./typewriter";
 
 export const DEFAULT_PARAGRAPH_NAV = true;
 
@@ -47,10 +48,25 @@ export function checkedParagraphNav(enabled: boolean): { paragraphNav: boolean }
   return { paragraphNav: enabled };
 }
 
+/**
+ * Returns the paragraph index to highlight. A pointer offset from
+ * scrolling wins over the caret.
+ */
+export function highlightedParagraphIndex(
+  source: string,
+  caret: number,
+  pointerOffset: number | undefined,
+): number {
+  return activeParagraphIndex(source, pointerOffset ?? caret);
+}
+
 export type ParagraphNavSurface = {
   getDocument: () => string;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
+  offsetAtClientPoint: (clientX: number, clientY: number) => number | undefined;
+  scrollElement: () => HTMLElement;
+  onScroll: (listener: () => void) => () => void;
   revealCaret: () => void;
   focus: () => void;
   onCaretOrDoc: (listener: () => void) => () => void;
@@ -64,13 +80,17 @@ export type ParagraphNavBinding = {
 
 /**
  * Renders equally spaced paragraph ticks in `host` and jumps the caret
- * to a paragraph start on click.
+ * to a paragraph start on click. User scrolling highlights the paragraph
+ * under the pointer without moving the caret.
  */
 export function bindParagraphNav(
   host: HTMLElement,
   surface: ParagraphNavSurface,
 ): ParagraphNavBinding {
   let enabled = DEFAULT_PARAGRAPH_NAV;
+  let pointer: { x: number; y: number } | undefined;
+  let pointerOffset: number | undefined;
+  let followPointer = false;
 
   const paint = (): void => {
     if (!enabled) {
@@ -82,7 +102,11 @@ export function bindParagraphNav(
     host.hidden = false;
     const source = surface.getDocument();
     const ranges = paragraphRanges(source);
-    const active = activeParagraphIndex(source, surface.getCaretOffset());
+    const active = highlightedParagraphIndex(
+      source,
+      surface.getCaretOffset(),
+      pointerOffset,
+    );
     const tops = tickTopsPx({
       count: ranges.length,
       viewHeightPx: host.clientHeight,
@@ -99,6 +123,19 @@ export function bindParagraphNav(
     host.replaceChildren(...nodes);
   };
 
+  const applyPointerFocus = (): void => {
+    if (!pointer) {
+      return;
+    }
+    const scroller = surface.scrollElement();
+    const rect = scroller.getBoundingClientRect();
+    const paddingLeftPx = parseFloat(getComputedStyle(scroller).paddingLeft);
+    const x = rect.left + paddingLeftPx + 4;
+    const y = Math.min(Math.max(pointer.y, rect.top + 1), rect.bottom - 1);
+    pointerOffset = surface.offsetAtClientPoint(x, y);
+    paint();
+  };
+
   const onHostClick = (event: MouseEvent): void => {
     const button = (event.target as HTMLElement | null)?.closest(
       "button.paragraph-tick",
@@ -112,14 +149,56 @@ export function bindParagraphNav(
     if (!range) {
       return;
     }
+    followPointer = false;
+    pointerOffset = undefined;
     surface.setCaretOffset(range.from);
     surface.focus();
     surface.revealCaret();
     paint();
   };
 
+  const onPointerMove = (event: PointerEvent): void => {
+    pointer = { x: event.clientX, y: event.clientY };
+  };
+
+  const onWheel = (): void => {
+    followPointer = true;
+  };
+
+  const onPointerDown = (event: PointerEvent): void => {
+    const scroller = surface.scrollElement();
+    const rect = scroller.getBoundingClientRect();
+    if (
+      pointerHitsScrollbar(
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        scroller.clientWidth,
+        scroller.clientHeight,
+      )
+    ) {
+      followPointer = true;
+    }
+  };
+
+  const onScroll = (): void => {
+    if (!followPointer) {
+      return;
+    }
+    applyPointerFocus();
+  };
+
+  const onCaretOrDoc = (): void => {
+    followPointer = false;
+    pointerOffset = undefined;
+    paint();
+  };
+
   host.addEventListener("click", onHostClick);
-  const stopCaret = surface.onCaretOrDoc(paint);
+  document.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("wheel", onWheel, { passive: true, capture: true });
+  const stopCaret = surface.onCaretOrDoc(onCaretOrDoc);
+  const stopScroll = surface.onScroll(onScroll);
   const observer = new ResizeObserver(paint);
   observer.observe(host);
   paint();
@@ -133,7 +212,11 @@ export function bindParagraphNav(
     disconnect: (): void => {
       observer.disconnect();
       stopCaret();
+      stopScroll();
       host.removeEventListener("click", onHostClick);
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("wheel", onWheel, true);
     },
   };
 }

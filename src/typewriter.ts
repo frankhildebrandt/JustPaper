@@ -47,6 +47,61 @@ export function measureCaretTopPx(textarea: HTMLTextAreaElement): number {
   return parseFloat(style.paddingTop) + lineOffsetPx;
 }
 
+/**
+ * Returns the document offset whose line sits under `clientY` in the textarea.
+ */
+export function textareaOffsetAtClientPoint(
+  textarea: HTMLTextAreaElement,
+  clientY: number,
+): number {
+  const source = textarea.value;
+  if (source.length === 0) {
+    return 0;
+  }
+
+  const style = getComputedStyle(textarea);
+  const mirror = document.createElement("div");
+  for (const property of MIRROR_STYLES) {
+    mirror.style.setProperty(property, style.getPropertyValue(property));
+  }
+  const rect = textarea.getBoundingClientRect();
+  const paddingLeftPx = parseFloat(style.paddingLeft);
+  const paddingTopPx = parseFloat(style.paddingTop);
+  const wrapWidthPx =
+    textarea.clientWidth - paddingLeftPx - parseFloat(style.paddingRight);
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.overflowWrap = "break-word";
+  mirror.style.padding = "0";
+  mirror.style.width = `${wrapWidthPx}px`;
+  mirror.style.left = `${rect.left + paddingLeftPx}px`;
+  mirror.style.top = `${rect.top + paddingTopPx - textarea.scrollTop}px`;
+  mirror.textContent = source;
+  document.body.append(mirror);
+  const textNode = mirror.firstChild;
+  if (!(textNode instanceof Text)) {
+    mirror.remove();
+    return 0;
+  }
+
+  let low = 0;
+  let high = source.length;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    const range = document.createRange();
+    range.setStart(textNode, Math.min(mid, textNode.length));
+    range.collapse(true);
+    if (range.getBoundingClientRect().top <= clientY) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+  mirror.remove();
+  return low;
+}
+
 export type TypewriterFollow = "follow" | "released";
 
 export type TypewriterGesture =
@@ -77,7 +132,7 @@ export function pointerHitsScrollbar(
 
 /**
  * Returns the typewriter follow state after a user gesture.
- * Wheel and scrollbar drags release follow until a left click or key.
+ * Wheel, scroll, and mouse clicks release follow until a key press.
  */
 export function typewriterFollowAfterGesture(
   follow: TypewriterFollow,
@@ -86,17 +141,9 @@ export function typewriterFollowAfterGesture(
   switch (gesture.type) {
     case "wheel":
     case "scroll":
-      return "released";
     case "pointerdown":
-      return gesture.onScrollbar ? "released" : follow;
     case "click":
-      if (gesture.onScrollbar) {
-        return "released";
-      }
-      if (gesture.button !== 0) {
-        return follow;
-      }
-      return "follow";
+      return "released";
     case "keydown":
       return MODIFIER_KEYS.has(gesture.key) ? follow : "follow";
   }
@@ -146,8 +193,8 @@ export function revealCaretLine(
 }
 
 /**
- * Keeps the caret line centered until the user scrolls, then waits for a
- * left click or keyboard input before following again.
+ * Keeps the caret line centered until the user scrolls or clicks, then waits
+ * for keyboard input before following again.
  */
 export function bindTypewriterScroll(target: TypewriterTarget): () => void {
   let follow: TypewriterFollow = "follow";

@@ -29,7 +29,7 @@ export function addAtxHash(source: string, pos: number): AtxEdit | undefined {
       caret: pos + 1,
     };
   }
-  if (pos !== block.from) {
+  if (block.kind !== "paragraph" || pos !== block.from) {
     return undefined;
   }
   return { from: block.from, to: block.from, insert: "# ", caret: block.from + 2 };

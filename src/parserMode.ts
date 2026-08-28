@@ -1,8 +1,9 @@
 import { linesPerPage, offsetAfterPage, offsetAtLine } from "./caret";
 import { bindMarkdownEditor } from "./markdown/editor";
+import type { MarkdownFeatures } from "./markdown/features";
 import type { HighlightMode } from "./highlightMode";
 import { LINE_CAPACITY } from "./pageLayout";
-import { measureCaretTopPx, revealCaretLine } from "./typewriter";
+import { measureCaretTopPx, revealCaretLine, textareaOffsetAtClientPoint } from "./typewriter";
 import {
   textareaLayoutHost,
   type ViewModeBinding,
@@ -37,11 +38,17 @@ export type ParserModeBinding = {
   setDocument: (text: string, caretLine?: number) => void;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
+  offsetAtClientPoint: (clientX: number, clientY: number) => number | undefined;
+  scrollElement: () => HTMLElement;
+  onScroll: (listener: () => void) => () => void;
   revealCaret: () => void;
   onChange: (listener: () => void) => () => void;
   onCaretOrDoc: (listener: () => void) => () => void;
   setWikiFollow: (handler: ((target: string) => void) | undefined) => void;
   applyHighlightMode: (mode: HighlightMode) => void;
+  setMarkdownFeatures: (features: MarkdownFeatures) => void;
+  setMarkdownGraphic: (enabled: boolean) => void;
+  setAssetBase: (dir: string | null) => void;
   focus: () => void;
   disconnect: () => void;
 };
@@ -189,6 +196,19 @@ export function bindParserMode(
     markdown.revealCaret();
   };
 
+  const offsetAtClientPoint = (
+    clientX: number,
+    clientY: number,
+  ): number | undefined => {
+    if (mode === "plain") {
+      return textareaOffsetAtClientPoint(textarea, clientY);
+    }
+    return markdown.offsetAtClientPoint(clientX, clientY);
+  };
+
+  const scrollElement = (): HTMLElement =>
+    mode === "plain" ? textarea : markdown.layoutElement;
+
   const focus = (): void => {
     if (mode === "plain") {
       textarea.focus();
@@ -204,6 +224,16 @@ export function bindParserMode(
     setDocument,
     getCaretOffset,
     setCaretOffset,
+    offsetAtClientPoint,
+    scrollElement,
+    onScroll: (listener: () => void): (() => void) => {
+      textarea.addEventListener("scroll", listener);
+      markdown.layoutElement.addEventListener("scroll", listener);
+      return () => {
+        textarea.removeEventListener("scroll", listener);
+        markdown.layoutElement.removeEventListener("scroll", listener);
+      };
+    },
     revealCaret,
     onChange: (listener: () => void): (() => void) => {
       changeListeners.add(listener);
@@ -242,6 +272,15 @@ export function bindParserMode(
     },
     applyHighlightMode: (mode: HighlightMode): void => {
       markdown.setHighlightMode(mode);
+    },
+    setMarkdownFeatures: (features: MarkdownFeatures): void => {
+      markdown.setFeatures(features);
+    },
+    setMarkdownGraphic: (enabled: boolean): void => {
+      markdown.setGraphic(enabled);
+    },
+    setAssetBase: (dir: string | null): void => {
+      markdown.setAssetBase(dir);
     },
     focus,
     disconnect: (): void => {

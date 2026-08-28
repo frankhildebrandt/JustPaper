@@ -1,5 +1,10 @@
 .md-mark {
   color: color-mix(in srgb, var(--ink) 42%, transparent);
+  letter-spacing: 0;
+  opacity: 1;
+  transition:
+    opacity 0.5s ease,
+    letter-spacing 0.5s ease;
 }
 
 .md-atx {
@@ -7,6 +12,53 @@
   right: 100%;
   color: color-mix(in srgb, var(--ink) 42%, transparent);
   white-space: pre;
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+
+.md-fence,
+.md-frontmatter,
+.md-table-pipe {
+  color: color-mix(in srgb, var(--ink) 42%, transparent);
+  opacity: 1;
+  letter-spacing: 0;
+  transition:
+    opacity 0.5s ease,
+    letter-spacing 0.5s ease;
+}
+
+/* Soften both reveal directions: marks when breaking open, widgets when collapsing. */
+.md-table-wrap,
+.md-code-card,
+.md-hr-wrap,
+.md-quote-graphic,
+.md-callout,
+.md-image-widget {
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+
+@starting-style {
+  .md-mark,
+  .md-fence,
+  .md-frontmatter,
+  .md-table-pipe {
+    opacity: 0;
+    letter-spacing: -0.35em;
+  }
+
+  .md-atx {
+    opacity: 0;
+  }
+
+  .md-table-wrap,
+  .md-code-card,
+  .md-hr-wrap,
+  .md-quote-graphic,
+  .md-callout,
+  .md-image-widget {
+    opacity: 0;
+  }
 }
 
 .md-strong {
@@ -27,6 +79,304 @@
   text-decoration: underline;
   text-underline-offset: 0.15em;
   cursor: pointer;
+}
+
+.md-codeblock {
+  font-family: "Courier Prime", ui-monospace, "Courier New", monospace;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.md-blockquote {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  padding-left: 0.75em;
+}
+
+.md-table-header {
+  font-weight: 700;
+}
+
+.md-table-wrap {
+  margin-block: 0.55em;
+  overflow-x: auto;
+}
+
+.md-table-wrap.is-editable {
+  cursor: pointer;
+}
+
+.md-table-graphic {
+  width: 100%;
+  border-collapse: collapse;
+  font: inherit;
+  white-space: normal;
+}
+
+.md-table-graphic th,
+.md-table-graphic td {
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  padding: 0.28em 0.55em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table-graphic th {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.md-code-card {
+  margin-block: 0.55em;
+  padding: 0.5em 0.65em 0.55em;
+  border: 1px solid color-mix(in srgb, var(--ink) 14%, transparent);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  overflow-x: auto;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.md-code-card.is-editable {
+  cursor: pointer;
+}
+
+.md-code-lang {
+  display: block;
+  margin-bottom: 0.35em;
+  font-size: 0.7em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+.md-code-line {
+  display: flex;
+  gap: 0.7em;
+}
+
+.md-code-n {
+  flex: 0 0 2ch;
+  text-align: right;
+  color: color-mix(in srgb, var(--ink) 38%, transparent);
+  user-select: none;
+}
+
+.md-code-src {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: 100%;
+  white-space: pre-wrap;
+}
+
+.md-syn-keyword {
+  font-weight: 700;
+}
+
+.md-syn-ident {
+  color: inherit;
+}
+
+.md-syn-string {
+  color: var(--accent);
+}
+
+.md-syn-comment {
+  color: color-mix(in srgb, var(--ink) 48%, transparent);
+}
+
+.md-syn-number {
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink));
+}
+
+.md-quote-graphic {
+  margin-block: 0.55em;
+  margin-inline: 0;
+  padding-left: 0.75em;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  white-space: normal;
+}
+
+.md-quote-graphic p {
+  margin: 0;
+}
+
+.md-quote-graphic p + p {
+  margin-top: 0.2em;
+}
+
+.md-callout {
+  --callout-color: var(--accent);
+  margin-block: 0.55em;
+  padding: 0.55em 0.75em 0.65em;
+  border-left: 3px solid var(--callout-color);
+  border-radius: 0 0.25em 0.25em 0;
+  background: color-mix(in srgb, var(--callout-color) 12%, transparent);
+  white-space: normal;
+}
+
+.md-callout-title {
+  font-weight: 700;
+  color: var(--callout-color);
+  margin-bottom: 0.25em;
+}
+
+.md-callout-body p {
+  margin: 0;
+}
+
+.md-callout-body p + p {
+  margin-top: 0.25em;
+}
+
+.md-blockquote.md-callout {
+  border-left-color: var(--callout-color);
+  background: color-mix(in srgb, var(--callout-color) 10%, transparent);
+}
+
+.md-callout-note,
+.md-callout-info,
+.md-callout-todo {
+  --callout-color: #4a7fb5;
+}
+
+.md-callout-abstract,
+.md-callout-tip,
+.md-callout-success {
+  --callout-color: #3f8f6b;
+}
+
+.md-callout-question {
+  --callout-color: #b89a2d;
+}
+
+.md-callout-warning {
+  --callout-color: #c48a2d;
+}
+
+.md-callout-failure,
+.md-callout-danger,
+.md-callout-bug {
+  --callout-color: #c44b4b;
+}
+
+.md-callout-example {
+  --callout-color: #6b6bb5;
+}
+
+.md-callout-quote {
+  --callout-color: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+
+.md-hr-wrap {
+  margin-block: 0.55em;
+}
+
+.md-hr-wrap.is-editable {
+  cursor: pointer;
+}
+
+.md-hr {
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  margin: 0;
+}
+
+.md-link,
+.md-image {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.md-image-widget {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-block: 0.4em;
+}
+
+.md-image-fallback {
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  font-style: italic;
+}
+
+.md-todo-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.92em;
+  height: 0.92em;
+  margin-inline: 0.12em 0.28em;
+  padding: 0;
+  vertical-align: -0.12em;
+  border: 1.5px solid var(--accent);
+  border-radius: 0.22em;
+  background: transparent;
+  cursor: pointer;
+  color: var(--paper);
+}
+
+.md-todo-box.is-checked {
+  background: var(--accent);
+  animation: md-todo-pop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.md-todo-tick {
+  width: 0.72em;
+  height: 0.72em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 16;
+  stroke-dashoffset: 16;
+}
+
+.md-todo-box.is-checked .md-todo-tick {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.2s ease 0.04s;
+}
+
+.md-todo-done {
+  text-decoration: line-through;
+  color: color-mix(in srgb, var(--ink) 48%, transparent);
+}
+
+@keyframes md-todo-pop {
+  0% {
+    transform: scale(0.72);
+  }
+  58% {
+    transform: scale(1.16);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-todo-box.is-checked {
+    animation: none;
+  }
+
+  .md-todo-box.is-checked .md-todo-tick {
+    transition: none;
+  }
+
+  .md-mark,
+  .md-atx,
+  .md-fence,
+  .md-frontmatter,
+  .md-table-pipe,
+  .md-table-wrap,
+  .md-code-card,
+  .md-hr-wrap,
+  .md-quote-graphic,
+  .md-callout,
+  .md-image-widget {
+    transition: none;
+  }
 }
 
 .highlight-dim,

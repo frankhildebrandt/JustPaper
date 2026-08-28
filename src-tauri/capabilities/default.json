@@ -22,6 +22,13 @@
     "allow-search-project",
     "allow-read-project-notes",
     {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" }
+      ]
+    },
+    {
       "identifier": "fs:scope",
       "allow": [{ "path": "$HOME/**" }]
     }

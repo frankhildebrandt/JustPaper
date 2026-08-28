@@ -154,7 +154,12 @@ body {
   background: var(--ink-muted);
 }
 
+.paragraph-tick.is-active {
+  width: 24px;
+}
+
 .paragraph-tick.is-active::before {
+  width: 16px;
   background: var(--ink);
 }
 
@@ -221,7 +226,7 @@ body {
   resize: none;
   background: transparent;
   color: var(--ink);
-  caret-color: var(--ink);
+  caret-color: var(--accent);
   font-family: "Courier Prime", ui-monospace, "Courier New", monospace;
   font-weight: 400;
   line-height: 1.55;

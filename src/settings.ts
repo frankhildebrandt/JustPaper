@@ -1,4 +1,11 @@
 import type { HighlightMode } from "./highlightMode";
+import {
+  DEFAULT_MARKDOWN_FEATURES,
+  MARKDOWN_FEATURES,
+  type MarkdownFeature,
+  type MarkdownFeatures,
+  withMarkdownFeature,
+} from "./markdown/features";
 import type { ParserMode } from "./parserMode";
 import type { ViewMode } from "./viewMode";
 
@@ -13,6 +20,8 @@ export type AppSettings = {
   viewMode: ViewMode;
   parserMode: ParserMode;
   highlightMode: HighlightMode;
+  markdownFeatures: MarkdownFeatures;
+  markdownGraphic: boolean;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -22,6 +31,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   viewMode: "typewriter",
   parserMode: "plain",
   highlightMode: "none",
+  markdownFeatures: { ...DEFAULT_MARKDOWN_FEATURES },
+  markdownGraphic: false,
 };
 
 export const SETTINGS_STORAGE_KEY = "justpaper.settings";
@@ -76,6 +87,8 @@ export function parseSettings(raw: string | null): AppSettings {
       viewMode: asViewMode(record.viewMode),
       parserMode: asParserMode(record.parserMode),
       highlightMode: asHighlightMode(record.highlightMode),
+      markdownFeatures: asMarkdownFeatures(record.markdownFeatures),
+      markdownGraphic: asBoolean(record.markdownGraphic, DEFAULT_SETTINGS.markdownGraphic),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -218,11 +231,31 @@ function asHighlightMode(value: unknown): HighlightMode {
     : DEFAULT_SETTINGS.highlightMode;
 }
 
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function asMarkdownFeatures(value: unknown): MarkdownFeatures {
+  if (value === null || typeof value !== "object") {
+    return { ...DEFAULT_MARKDOWN_FEATURES };
+  }
+  const record = value as Record<string, unknown>;
+  const features = { ...DEFAULT_MARKDOWN_FEATURES };
+  for (const id of MARKDOWN_FEATURES) {
+    if (typeof record[id] === "boolean") {
+      features[id] = record[id];
+    }
+  }
+  return features;
+}
+
 export type SettingsApply = {
   fontSize: (size: FontSize) => void;
   viewMode: (mode: ViewMode) => void;
   parserMode: (mode: ParserMode) => void;
   highlightMode: (mode: HighlightMode) => void;
+  markdownFeatures: (features: MarkdownFeatures) => void;
+  markdownGraphic: (enabled: boolean) => void;
 };
 
 export type SettingsBinding = {
@@ -233,6 +266,8 @@ export type SettingsBinding = {
   setViewMode: (mode: ViewMode) => void;
   setParserMode: (mode: ParserMode) => void;
   setHighlightMode: (mode: HighlightMode) => void;
+  setMarkdownFeature: (id: MarkdownFeature, enabled: boolean) => void;
+  setMarkdownGraphic: (enabled: boolean) => void;
 };
 
 /**
@@ -248,6 +283,8 @@ export function bindSettings(
   apply.viewMode(current.viewMode);
   apply.parserMode(current.parserMode);
   apply.highlightMode(current.highlightMode);
+  apply.markdownFeatures(current.markdownFeatures);
+  apply.markdownGraphic(current.markdownGraphic);
 
   const commit = (next: AppSettings): void => {
     current = next;
@@ -278,6 +315,19 @@ export function bindSettings(
     setHighlightMode: (highlightMode) => {
       commit({ ...current, highlightMode });
       apply.highlightMode(highlightMode);
+    },
+    setMarkdownFeature: (id, enabled) => {
+      const markdownFeatures = withMarkdownFeature(
+        current.markdownFeatures,
+        id,
+        enabled,
+      );
+      commit({ ...current, markdownFeatures });
+      apply.markdownFeatures(markdownFeatures);
+    },
+    setMarkdownGraphic: (enabled) => {
+      commit({ ...current, markdownGraphic: enabled });
+      apply.markdownGraphic(enabled);
     },
   };
 }

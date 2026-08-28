@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { checkedParagraphNav, tickTopsPx } from "./paragraphNav";
+import {
+  checkedParagraphNav,
+  highlightedParagraphIndex,
+  tickTopsPx,
+} from "./paragraphNav";
 
 describe("tickTopsPx", () => {
   it("centers a single tick in the view", () => {
@@ -60,6 +64,16 @@ describe("tickTopsPx", () => {
         insetPx: 0,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("highlightedParagraphIndex", () => {
+  it("keeps the caret paragraph when the pointer has no document offset", () => {
+    expect(highlightedParagraphIndex("one\n\ntwo", 1, undefined)).toBe(0);
+  });
+
+  it("follows the pointer offset while scrolling", () => {
+    expect(highlightedParagraphIndex("one\n\ntwo", 1, 5)).toBe(1);
   });
 });
 

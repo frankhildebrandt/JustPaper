@@ -20,6 +20,8 @@ import {
   type ParserMode,
   type ParserModeBinding,
 } from "./parserMode";
+import { markdownFeatureMenuItems } from "./markdown/menu";
+import type { MarkdownFeature } from "./markdown/features";
 import { recentFileLabels } from "./recentFiles";
 import {
   checkedAppearanceItems,
@@ -212,6 +214,8 @@ export async function bindAppMenu(
   let colorGreenItem: CheckMenuItem;
   let lightItem: CheckMenuItem;
   let darkItem: CheckMenuItem;
+  let featureItems = {} as Record<MarkdownFeature, CheckMenuItem>;
+  let graphicItem: CheckMenuItem;
 
   const selectView = (mode: ViewMode): void => {
     settings.setViewMode(mode);
@@ -268,6 +272,18 @@ export async function bindAppMenu(
     const enabled = !paragraphNav.isEnabled();
     paragraphNav.setEnabled(enabled);
     void paragraphNavItem.setChecked(checkedParagraphNav(enabled).paragraphNav);
+  };
+
+  const toggleMarkdownFeature = (id: MarkdownFeature): void => {
+    const enabled = !settings.get().markdownFeatures[id];
+    settings.setMarkdownFeature(id, enabled);
+    void featureItems[id].setChecked(enabled);
+  };
+
+  const toggleMarkdownGraphic = (): void => {
+    const enabled = !settings.get().markdownGraphic;
+    settings.setMarkdownGraphic(enabled);
+    void graphicItem.setChecked(enabled);
   };
 
   const install = async (): Promise<void> => {
@@ -468,6 +484,20 @@ export async function bindAppMenu(
       },
     });
 
+    const markdownMenu = await markdownFeatureMenuItems(
+      settings.get().markdownFeatures,
+      toggleMarkdownFeature,
+    );
+    featureItems = markdownMenu.byId;
+    graphicItem = await CheckMenuItem.new({
+      id: "markdown-graphic",
+      text: "Grafisch",
+      checked: settings.get().markdownGraphic,
+      action: () => {
+        toggleMarkdownGraphic();
+      },
+    });
+
     const appSubmenu = await Submenu.new({
       text: "JustPaper",
       items: [
@@ -501,6 +531,14 @@ export async function bindAppMenu(
             project.findInDocument();
           },
         }),
+      ],
+    });
+    const markdownSubmenu = await Submenu.new({
+      text: "Markdown",
+      items: [
+        graphicItem,
+        await PredefinedMenuItem.new({ item: "Separator" }),
+        ...markdownMenu.items,
       ],
     });
     const viewSubmenu = await Submenu.new({
@@ -539,7 +577,7 @@ export async function bindAppMenu(
       ],
     });
     const menu = await Menu.new({
-      items: [appSubmenu, fileSubmenu, editSubmenu, viewSubmenu],
+      items: [appSubmenu, fileSubmenu, editSubmenu, markdownSubmenu, viewSubmenu],
     });
     await menu.setAsAppMenu();
   };

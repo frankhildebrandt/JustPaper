@@ -1,4 +1,15 @@
 import { parseWikiLink } from "../wikiLink";
+import {
+  DEFAULT_MARKDOWN_FEATURES,
+  type MarkdownFeatures,
+} from "./features";
+import { parseFence } from "./parseFence";
+import { parseFrontmatter } from "./parseFrontmatter";
+import { parseHr } from "./parseHr";
+import { parseInlineLink } from "./parseLink";
+import { parseQuote } from "./parseQuote";
+import { parseTable } from "./parseTable";
+import { parseTodo } from "./parseTodo";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -19,6 +30,7 @@ export type MarkedSpan = {
   to: number;
   markOpen: MarkRange;
   markClose: MarkRange;
+  children: InlineSpan[];
 };
 
 export type WikiSpan = {
@@ -33,7 +45,19 @@ export type WikiSpan = {
   suppress: MarkRange | undefined;
 };
 
-export type InlineSpan = TextSpan | MarkedSpan | WikiSpan;
+export type LinkSpan = {
+  kind: "link" | "image";
+  from: number;
+  to: number;
+  href: string;
+  alt: string;
+  markOpen: MarkRange;
+  markClose: MarkRange;
+  label: MarkRange;
+  dest: MarkRange;
+};
+
+export type InlineSpan = TextSpan | MarkedSpan | WikiSpan | LinkSpan;
 
 export type ParagraphBlock = {
   kind: "paragraph";
@@ -52,14 +76,91 @@ export type HeadingBlock = {
   children: InlineSpan[];
 };
 
-export type Block = ParagraphBlock | HeadingBlock;
+export type FrontmatterBlock = {
+  kind: "frontmatter";
+  from: number;
+  to: number;
+};
+
+export type QuoteLine = {
+  from: number;
+  to: number;
+  mark: MarkRange;
+  children: InlineSpan[];
+};
+
+export type BlockquoteBlock = {
+  kind: "blockquote";
+  from: number;
+  to: number;
+  lines: QuoteLine[];
+  callout:
+    | {
+        type: string;
+        title: string | undefined;
+        marker: MarkRange;
+        titleRange: MarkRange | undefined;
+      }
+    | undefined;
+};
+
+export type CodeblockBlock = {
+  kind: "codeblock";
+  from: number;
+  to: number;
+  open: MarkRange;
+  close: MarkRange | undefined;
+  language: string;
+};
+
+export type TableBlock = {
+  kind: "table";
+  from: number;
+  to: number;
+  header: MarkRange;
+  delimiter: MarkRange;
+  rows: MarkRange[];
+  pipes: MarkRange[];
+  headerCells: MarkRange[];
+};
+
+export type TodoBlock = {
+  kind: "todo";
+  from: number;
+  to: number;
+  listMark: MarkRange;
+  box: MarkRange;
+  checked: boolean;
+  contentFrom: number;
+  children: InlineSpan[];
+};
+
+export type HrBlock = {
+  kind: "hr";
+  from: number;
+  to: number;
+};
+
+export type Block =
+  | ParagraphBlock
+  | HeadingBlock
+  | FrontmatterBlock
+  | BlockquoteBlock
+  | CodeblockBlock
+  | TableBlock
+  | TodoBlock
+  | HrBlock;
 
 const ATX_HEADING = /^(#{1,6}) /;
 
 /**
  * Splits a markdown source string into blocks with source offsets.
+ * Disabled features are left as ordinary paragraph text.
  */
-export function parseMarkdown(source: string): Block[] {
+export function parseMarkdown(
+  source: string,
+  features: MarkdownFeatures = DEFAULT_MARKDOWN_FEATURES,
+): Block[] {
   if (source.length === 0) {
     return [];
   }
@@ -67,9 +168,96 @@ export function parseMarkdown(source: string): Block[] {
   const blocks: Block[] = [];
   let lineStart = 0;
   while (lineStart <= source.length) {
+    if (
+      lineStart === 0 &&
+      features.frontmatter
+    ) {
+      const frontmatter = parseFrontmatter(source, 0);
+      if (frontmatter) {
+        blocks.push({
+          kind: "frontmatter",
+          from: frontmatter.from,
+          to: frontmatter.to,
+        });
+        lineStart = frontmatter.next;
+        continue;
+      }
+    }
+    if (features.codeblock) {
+      const fence = parseFence(source, lineStart);
+      if (fence) {
+        blocks.push({
+          kind: "codeblock",
+          from: fence.from,
+          to: fence.to,
+          open: fence.open,
+          close: fence.close,
+          language: fence.language,
+        });
+        lineStart = fence.next;
+        continue;
+      }
+    }
+    if (features.table) {
+      const table = parseTable(source, lineStart);
+      if (table) {
+        blocks.push({
+          kind: "table",
+          from: table.from,
+          to: table.to,
+          header: table.header,
+          delimiter: table.delimiter,
+          rows: table.rows,
+          pipes: table.pipes,
+          headerCells: table.headerCells,
+        });
+        lineStart = table.next;
+        continue;
+      }
+    }
+    if (features.blockquote) {
+      const quote = parseQuote(source, lineStart);
+      if (quote) {
+        blocks.push({
+          kind: "blockquote",
+          from: quote.from,
+          to: quote.to,
+          callout: quote.callout
+            ? {
+                type: quote.callout.type,
+                title: quote.callout.title,
+                marker: quote.callout.marker,
+                titleRange: quote.callout.titleRange,
+              }
+            : undefined,
+          lines: quote.lines.map((line, index) => ({
+            ...line,
+            children: quoteLineChildren(
+              source,
+              line,
+              index,
+              quote.callout,
+              features,
+            ),
+          })),
+        });
+        lineStart = quote.next;
+        continue;
+      }
+    }
+    const hr = parseHr(source, lineStart);
+    if (hr) {
+      blocks.push({
+        kind: "hr",
+        from: hr.from,
+        to: hr.to,
+      });
+      lineStart = hr.next;
+      continue;
+    }
     const newlineAt = source.indexOf("\n", lineStart);
     const lineEnd = newlineAt === -1 ? source.length : newlineAt;
-    const block = parseLine(source, lineStart, lineEnd);
+    const block = parseLine(source, lineStart, lineEnd, features);
     if (block) {
       blocks.push(block);
     }
@@ -81,23 +269,70 @@ export function parseMarkdown(source: string): Block[] {
   return blocks;
 }
 
+/**
+ * Inline spans for a quote line; callout markers are left out of the tree.
+ */
+function quoteLineChildren(
+  source: string,
+  line: { from: number; to: number; mark: MarkRange },
+  index: number,
+  callout:
+    | {
+        marker: MarkRange;
+        titleRange: MarkRange | undefined;
+      }
+    | undefined,
+  features: MarkdownFeatures,
+): InlineSpan[] {
+  if (index === 0 && callout) {
+    if (!callout.titleRange) {
+      return [];
+    }
+    return parseInline(
+      source,
+      callout.titleRange.from,
+      callout.titleRange.to,
+      features,
+    );
+  }
+  return parseInline(source, line.mark.to, line.to, features);
+}
+
 function parseLine(
   source: string,
   from: number,
   to: number,
+  features: MarkdownFeatures,
 ): Block | undefined {
   if (from === to) {
     return undefined;
   }
-  const heading = parseHeadingLine(source, from, to);
-  if (heading) {
-    return heading;
+  if (features.todo) {
+    const todo = parseTodo(source, from, to);
+    if (todo) {
+      return {
+        kind: "todo",
+        from: todo.from,
+        to: todo.to,
+        listMark: todo.listMark,
+        box: todo.box,
+        checked: todo.checked,
+        contentFrom: todo.contentFrom,
+        children: parseInline(source, todo.contentFrom, to, features),
+      };
+    }
+  }
+  if (features.heading) {
+    const heading = parseHeadingLine(source, from, to, features);
+    if (heading) {
+      return heading;
+    }
   }
   return {
     kind: "paragraph",
     from,
     to,
-    children: parseInline(source, from, to),
+    children: parseInline(source, from, to, features),
   };
 }
 
@@ -105,6 +340,7 @@ function parseHeadingLine(
   source: string,
   from: number,
   to: number,
+  features: MarkdownFeatures,
 ): HeadingBlock | undefined {
   const line = source.slice(from, to);
   const match = ATX_HEADING.exec(line);
@@ -123,7 +359,7 @@ function parseHeadingLine(
     to,
     atxFrom,
     atxTo,
-    children: parseInline(source, contentFrom, to),
+    children: parseInline(source, contentFrom, to, features),
   };
 }
 
@@ -133,7 +369,24 @@ const INLINE_MARKS: ReadonlyArray<{ mark: string; kind: MarkedSpan["kind"] }> = 
   { mark: "*", kind: "em" },
 ];
 
-function parseInline(source: string, from: number, to: number): InlineSpan[] {
+/**
+ * Parses inline markdown in `[from, to)` of `source` (used by table cells).
+ */
+export function parseInlineMarkdown(
+  source: string,
+  from: number,
+  to: number,
+  features: MarkdownFeatures = DEFAULT_MARKDOWN_FEATURES,
+): InlineSpan[] {
+  return parseInline(source, from, to, features);
+}
+
+function parseInline(
+  source: string,
+  from: number,
+  to: number,
+  features: MarkdownFeatures,
+): InlineSpan[] {
   if (from >= to) {
     return [];
   }
@@ -141,7 +394,7 @@ function parseInline(source: string, from: number, to: number): InlineSpan[] {
   let cursor = from;
   let textFrom = from;
   while (cursor < to) {
-    const wrapped = matchInlineMark(source, cursor, to);
+    const wrapped = matchInlineMark(source, cursor, to, features);
     if (!wrapped) {
       cursor += 1;
       continue;
@@ -163,13 +416,33 @@ function matchInlineMark(
   source: string,
   from: number,
   to: number,
+  features: MarkdownFeatures,
 ): InlineSpan | undefined {
-  const wiki = matchWikiSpan(source, from, to);
-  if (wiki) {
-    return wiki;
+  if (features.wiki) {
+    const wiki = matchWikiSpan(source, from, to);
+    if (wiki) {
+      return wiki;
+    }
+  }
+  if (features.image || features.externalLink) {
+    const linked = parseInlineLink(source, from);
+    if (linked && linked.to <= to) {
+      if (linked.kind === "image" && features.image) {
+        return linked;
+      }
+      if (linked.kind === "link" && features.externalLink) {
+        return linked;
+      }
+    }
+  }
+  if (source.startsWith("**", from) && !features.strong) {
+    return undefined;
   }
   for (const { mark, kind } of INLINE_MARKS) {
-    if (!source.startsWith(mark, from)) {
+    if (!featureEnabled(features, kind) || !source.startsWith(mark, from)) {
+      continue;
+    }
+    if (kind === "em" && from > 0 && source[from - 1] === "*") {
       continue;
     }
     const afterOpen = from + mark.length;
@@ -180,15 +453,30 @@ function matchInlineMark(
     if (closeFrom === -1 || closeFrom >= to) {
       return undefined;
     }
+    const children =
+      kind === "code"
+        ? []
+        : parseInline(source, afterOpen, closeFrom, features);
     return {
       kind,
       from,
       to: closeFrom + mark.length,
       markOpen: { from, to: afterOpen },
       markClose: { from: closeFrom, to: closeFrom + mark.length },
+      children,
     };
   }
   return undefined;
+}
+
+function featureEnabled(
+  features: MarkdownFeatures,
+  kind: MarkedSpan["kind"],
+): boolean {
+  if (kind === "code") {
+    return features.inlineCode;
+  }
+  return features[kind];
 }
 
 function matchWikiSpan(
