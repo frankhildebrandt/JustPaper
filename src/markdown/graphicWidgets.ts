@@ -330,12 +330,15 @@ function nodeToDom(node: CellNode): Node {
     }
     return el;
   }
-  const tag =
-    node.kind === "strong" ? "strong" : node.kind === "em" ? "em" : "code";
-  const el = document.createElement(tag);
-  el.className = `md-${node.kind}`;
-  appendNodes(el, node.children);
-  return el;
+  if (node.kind === "strong" || node.kind === "em" || node.kind === "code") {
+    const tag =
+      node.kind === "strong" ? "strong" : node.kind === "em" ? "em" : "code";
+    const el = document.createElement(tag);
+    el.className = `md-${node.kind}`;
+    appendNodes(el, node.children);
+    return el;
+  }
+  return document.createTextNode("");
 }
 
 function sameCells(left: string[], right: string[]): boolean {

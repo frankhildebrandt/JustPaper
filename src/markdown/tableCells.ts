@@ -77,7 +77,9 @@ export function cellNodesFromSpans(
       });
       continue;
     }
-    nodes.push({ kind: "text", text: span.alt });
+    if (span.kind === "image") {
+      nodes.push({ kind: "text", text: span.alt });
+    }
   }
   return nodes;
 }

@@ -4,6 +4,7 @@ import {
 } from "./features";
 import type { InlineSpan } from "./parse";
 import { parseInlineMarkdown } from "./parse";
+import { nativeCaretFromPoint } from "./caretPoint";
 
 /**
  * Maps a displayed-character index inside a rendered cell to a source offset
@@ -96,27 +97,9 @@ export function displayOffsetFromPoint(
   if (edges.length > 0) {
     return offsetFromGlyphEdges(edges, (cell.textContent ?? "").length, clientX);
   }
-  const caretRange =
-    typeof document.caretRangeFromPoint === "function"
-      ? document.caretRangeFromPoint(clientX, _clientY)
-      : undefined;
-  if (caretRange && cell.contains(caretRange.startContainer)) {
-    return (
-      textOffsetInElement(
-        cell,
-        caretRange.startContainer,
-        caretRange.startOffset,
-      ) ?? 0
-    );
-  }
-  const caretPos =
-    typeof document.caretPositionFromPoint === "function"
-      ? document.caretPositionFromPoint(clientX, _clientY)
-      : null;
-  if (caretPos && cell.contains(caretPos.offsetNode)) {
-    return (
-      textOffsetInElement(cell, caretPos.offsetNode, caretPos.offset) ?? 0
-    );
+  const caret = nativeCaretFromPoint(clientX, _clientY);
+  if (caret && cell.contains(caret.node)) {
+    return textOffsetInElement(cell, caret.node, caret.offset) ?? 0;
   }
   return 0;
 }

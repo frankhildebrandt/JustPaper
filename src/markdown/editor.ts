@@ -29,6 +29,7 @@ import {
   type GraphicSpan,
 } from "./graphicNav";
 import { graphicWidgetFromDomPos } from "./graphicWidgetDom";
+import { nativeCaretFromPoint } from "./caretPoint";
 import {
   bestPosOnLineByCoords,
   clickPosMatchesPoint,
@@ -39,9 +40,6 @@ import {
   sourcePosFromTablePoint,
   visualLineProbeY,
 } from "./visualPos";
-
-/** Last known caret screen x so blank lines do not reset the visual column. */
-let lastCaretScreenX: number | undefined;
 import {
   DEFAULT_MARKDOWN_FEATURES,
   type MarkdownFeatures,
@@ -57,6 +55,8 @@ import { resolveImageSrc } from "./imageSrc";
 import { toggleTodoCheck } from "./parseTodo";
 import { allowCaretReveal, pointerSnapSelection, selectionLockHolds } from "./revealTiming";
 
+/** Last known caret screen x so blank lines do not reset the visual column. */
+let lastCaretScreenX: number | undefined;
 const setShowMarks = StateEffect.define<boolean>();
 const setHighlightModeEffect = StateEffect.define<HighlightMode>();
 const setFeaturesEffect = StateEffect.define<MarkdownFeatures>();
@@ -995,26 +995,12 @@ function posFromNativeCaretPoint(
   clientX: number,
   clientY: number,
 ): number | null {
-  let node: Node | null = null;
-  let offset = 0;
-  if (typeof document.caretRangeFromPoint === "function") {
-    const range = document.caretRangeFromPoint(clientX, clientY);
-    if (range) {
-      node = range.startContainer;
-      offset = range.startOffset;
-    }
-  } else if (typeof document.caretPositionFromPoint === "function") {
-    const pos = document.caretPositionFromPoint(clientX, clientY);
-    if (pos) {
-      node = pos.offsetNode;
-      offset = pos.offset;
-    }
-  }
-  if (!node || !view.contentDOM.contains(node)) {
+  const caret = nativeCaretFromPoint(clientX, clientY);
+  if (!caret || !view.contentDOM.contains(caret.node)) {
     return null;
   }
   try {
-    const docPos = view.posAtDOM(node, offset);
+    const docPos = view.posAtDOM(caret.node, caret.offset);
     const box =
       view.coordsAtPos(docPos) ?? view.coordsAtPos(Math.max(0, docPos - 1));
     if (!clickPosMatchesPoint(clientX, clientY, box, 40, 120)) {
