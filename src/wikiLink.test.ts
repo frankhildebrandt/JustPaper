@@ -63,6 +63,12 @@ describe("resolveWikiLink", () => {
     expect(resolveWikiLink("hello", files)).toBe("Hello.md");
   });
 
+  it("matches a typst note without extension", () => {
+    expect(resolveWikiLink("Paper", ["Paper.typ", "Hello.md"])).toBe(
+      "Paper.typ",
+    );
+  });
+
   it("returns undefined when nothing matches", () => {
     expect(resolveWikiLink("Missing", files)).toBeUndefined();
   });

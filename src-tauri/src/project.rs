@@ -20,7 +20,7 @@ pub struct ProjectNote {
 }
 
 /**
- * Lists project-relative markdown and text files under `root`.
+ * Lists project-relative markdown, Typst, and text files under `root`.
  */
 #[tauri::command]
 pub fn list_project_files(root: String) -> Result<Vec<String>, String> {
@@ -113,7 +113,7 @@ fn is_note(path: &Path) -> bool {
         .map(|extension| extension.to_ascii_lowercase())
         .as_deref()
     {
-        Some("md") | Some("txt") => true,
+        Some("md") | Some("txt") | Some("typ") => true,
         _ => false,
     }
 }
@@ -142,6 +142,7 @@ mod tests {
         ));
         fs::create_dir_all(dir.join("sub")).expect("mkdir");
         fs::write(dir.join("Hello.md"), "hello world\nsecond").expect("write md");
+        fs::write(dir.join("Paper.typ"), "= Title\n").expect("write typ");
         fs::write(dir.join("sub").join("Note.txt"), "needle here").expect("write txt");
         fs::write(dir.join("binary.bin"), [0, 1, 2, 3]).expect("write bin");
         run(&dir);
@@ -154,7 +155,11 @@ mod tests {
             let files = list_project_files(dir.to_string_lossy().into_owned()).unwrap();
             assert_eq!(
                 files,
-                vec!["Hello.md".to_string(), "sub/Note.txt".to_string()]
+                vec![
+                    "Hello.md".to_string(),
+                    "Paper.typ".to_string(),
+                    "sub/Note.txt".to_string()
+                ]
             );
         });
     }
@@ -174,11 +179,13 @@ mod tests {
     fn reads_note_contents_and_skips_non_notes() {
         with_vault(|dir| {
             let notes = read_project_notes(dir.to_string_lossy().into_owned()).unwrap();
-            assert_eq!(notes.len(), 2);
+            assert_eq!(notes.len(), 3);
             assert_eq!(notes[0].path, "Hello.md");
             assert_eq!(notes[0].content, "hello world\nsecond");
-            assert_eq!(notes[1].path, "sub/Note.txt");
-            assert_eq!(notes[1].content, "needle here");
+            assert_eq!(notes[1].path, "Paper.typ");
+            assert_eq!(notes[1].content, "= Title\n");
+            assert_eq!(notes[2].path, "sub/Note.txt");
+            assert_eq!(notes[2].content, "needle here");
         });
     }
 }

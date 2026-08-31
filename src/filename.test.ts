@@ -14,6 +14,10 @@ describe("displayName", () => {
     expect(displayName("/vault/Hello.md")).toBe("Hello");
   });
 
+  it("hides the .typ extension", () => {
+    expect(displayName("/vault/Paper.typ")).toBe("Paper");
+  });
+
   it("keeps non-md extensions visible", () => {
     expect(displayName("/vault/notes.txt")).toBe("notes.txt");
   });
@@ -22,6 +26,10 @@ describe("displayName", () => {
 describe("renamePath", () => {
   it("keeps a markdown file next to its current path", () => {
     expect(renamePath("/vault/Hello.md", "World")).toBe("/vault/World.md");
+  });
+
+  it("keeps a typst extension when the typed name has none", () => {
+    expect(renamePath("/vault/Paper.typ", "Draft")).toBe("/vault/Draft.typ");
   });
 
   it("keeps a non-md extension when the typed name has none", () => {

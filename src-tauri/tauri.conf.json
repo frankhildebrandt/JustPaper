@@ -43,7 +43,7 @@
     "copyright": "Copyright (C) 2026 Frank Hildebrandt",
     "category": "Productivity",
     "shortDescription": "A frameless typewriter on a sheet of paper",
-    "longDescription": "JustPaper is a quiet markdown writing app: one sheet of paper, local files, and an optional project folder with palettes and wikilinks.",
+    "longDescription": "JustPaper is a quiet writing app: one sheet of paper, local markdown and Typst files, and an optional project folder with palettes and wikilinks.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

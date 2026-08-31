@@ -35,7 +35,13 @@ export type DecorationKind =
   | "code-widget"
   | "quote-widget"
   | "hr-widget"
-  | "callout-title";
+  | "callout-title"
+  | "math"
+  | "comment"
+  | "hash"
+  | "label"
+  | "ref"
+  | "line-list";
 
 export type DecorationSpec = {
   kind: DecorationKind;

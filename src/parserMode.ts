@@ -10,7 +10,12 @@ import {
 } from "./viewMode";
 import { wikiLinkAt } from "./wikiLink";
 
-export type ParserMode = "plain" | "markdownEdit" | "markdownView";
+export type ParserMode =
+  | "plain"
+  | "markdownEdit"
+  | "markdownView"
+  | "typstEdit"
+  | "typstView";
 
 export const DEFAULT_PARSER_MODE: ParserMode = "plain";
 
@@ -18,6 +23,8 @@ export type CheckedParserModeItems = {
   plain: boolean;
   markdownEdit: boolean;
   markdownView: boolean;
+  typstEdit: boolean;
+  typstView: boolean;
 };
 
 /**
@@ -28,7 +35,49 @@ export function checkedParserModeItems(mode: ParserMode): CheckedParserModeItems
     plain: mode === "plain",
     markdownEdit: mode === "markdownEdit",
     markdownView: mode === "markdownView",
+    typstEdit: mode === "typstEdit",
+    typstView: mode === "typstView",
   };
+}
+
+/**
+ * Maps a file path onto the current edit/view surface, leaving Nur Text alone.
+ */
+export function parserModeForPath(
+  path: string | null,
+  current: ParserMode,
+): ParserMode {
+  if (current === "plain" || path === null) {
+    return current;
+  }
+  const extension = pathExtension(path);
+  const view = current === "markdownView" || current === "typstView";
+  if (extension === "typ") {
+    return view ? "typstView" : "typstEdit";
+  }
+  if (extension === "md") {
+    return view ? "markdownView" : "markdownEdit";
+  }
+  return current;
+}
+
+function pathExtension(path: string): string {
+  const name = path.split(/[/\\]/).pop() ?? path;
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) {
+    return "";
+  }
+  return name.slice(dot + 1).toLowerCase();
+}
+
+function isParserMode(value: unknown): value is ParserMode {
+  return (
+    value === "plain" ||
+    value === "markdownEdit" ||
+    value === "markdownView" ||
+    value === "typstEdit" ||
+    value === "typstView"
+  );
 }
 
 export type ParserModeBinding = {
@@ -104,14 +153,24 @@ export function bindParserMode(
     }
     textarea.hidden = true;
     markdownParent.hidden = false;
-    markdownParent.classList.toggle("is-view", next === "markdownView");
-    markdown.setSurface(next);
+    markdownParent.classList.toggle(
+      "is-view",
+      next === "markdownView" || next === "typstView",
+    );
+    markdown.setLanguage(
+      next === "typstEdit" || next === "typstView" ? "typst" : "markdown",
+    );
+    markdown.setSurface(
+      next === "markdownView" || next === "typstView" ? "view" : "edit",
+    );
     view.setHost({
       layoutElement: markdown.layoutElement,
       typewriter:
-        next === "markdownEdit" ? markdown.typewriterTarget : undefined,
+        next === "markdownEdit" || next === "typstEdit"
+          ? markdown.typewriterTarget
+          : undefined,
     });
-    if (next === "markdownEdit") {
+    if (next === "markdownEdit" || next === "typstEdit") {
       markdown.focus();
     }
   };
@@ -126,7 +185,7 @@ export function bindParserMode(
 
   const onParserEvent = (event: Event): void => {
     const next = (event as CustomEvent<unknown>).detail;
-    if (next === "plain" || next === "markdownEdit" || next === "markdownView") {
+    if (isParserMode(next)) {
       setParserMode(next);
     }
   };
@@ -235,7 +294,9 @@ export function bindParserMode(
       return markdown.isSelectionEmpty();
     },
     caretScreenBox: () =>
-      mode === "markdownEdit" ? markdown.caretScreenBox() : null,
+      mode === "markdownEdit" || mode === "typstEdit"
+        ? markdown.caretScreenBox()
+        : null,
     replaceRange: (from: number, to: number, text: string): void => {
       if (mode === "plain") {
         const value = textarea.value;

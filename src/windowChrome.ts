@@ -3,11 +3,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export const WINDOW_CONTROLS_EDGE_PX = 40;
 const VISIBLE_CLASS = "is-visible";
 const FULLSCREEN_CLASS = "is-fullscreen";
+const MAXIMIZED_CLASS = "is-maximized";
 
 export type ZoomAction = "fullscreen" | "maximize";
 
 /**
- * Returns whether the traffic lights should show for a pointer at `mouseY`.
+ * Returns whether the pointer is in the top chrome hover strip.
  */
 export function windowControlsVisible(
   mouseY: number,
@@ -17,9 +18,37 @@ export function windowControlsVisible(
 }
 
 /**
- * Maps a green-button click: Option zooms, otherwise native fullscreen.
+ * True when the UI should use Windows caption chrome.
  */
-export function zoomAction(altKey: boolean): ZoomAction {
+export function isWindowsChrome(
+  userAgent: string = typeof navigator !== "undefined" ? navigator.userAgent : "",
+): boolean {
+  return /Windows/i.test(userAgent);
+}
+
+/**
+ * Marks the document root for Windows vs macOS chrome CSS.
+ */
+export function applyChromePlatform(
+  root: HTMLElement = document.documentElement,
+): void {
+  if (isWindowsChrome()) {
+    root.dataset.chrome = "windows";
+  } else {
+    delete root.dataset.chrome;
+  }
+}
+
+/**
+ * Maps a green-button click: Option maximizes on macOS; Windows always maximizes.
+ */
+export function zoomAction(
+  altKey: boolean,
+  windows: boolean = false,
+): ZoomAction {
+  if (windows) {
+    return "maximize";
+  }
   return altKey ? "maximize" : "fullscreen";
 }
 
@@ -68,7 +97,7 @@ export function bindWindowChrome(
 }
 
 /**
- * Wires macOS-style traffic lights to the current Tauri window.
+ * Wires traffic lights / Windows caption buttons to the current Tauri window.
  */
 export function bindTrafficLights(buttons: {
   close: HTMLElement;
@@ -80,6 +109,7 @@ export function bindTrafficLights(buttons: {
   }
 
   const appWindow = getCurrentWindow();
+  const windows = isWindowsChrome();
   const onClose = (): void => {
     void appWindow.close();
   };
@@ -87,7 +117,7 @@ export function bindTrafficLights(buttons: {
     void appWindow.minimize();
   };
   const onZoom = (event: MouseEvent): void => {
-    if (zoomAction(event.altKey) === "maximize") {
+    if (zoomAction(event.altKey, windows) === "maximize") {
       void appWindow.toggleMaximize();
       return;
     }
@@ -106,7 +136,33 @@ export function bindTrafficLights(buttons: {
 }
 
 /**
- * Toggles macOS fullscreen (own Space).
+ * Mirrors maximize state onto the zoom/caption button (Windows restore glyph).
+ */
+export function bindMaximizeClass(zoom: HTMLElement): () => void {
+  if (!isTauriRuntime() || !isWindowsChrome()) {
+    return () => {};
+  }
+
+  const appWindow = getCurrentWindow();
+  const sync = async (): Promise<void> => {
+    zoom.classList.toggle(MAXIMIZED_CLASS, await appWindow.isMaximized());
+  };
+  void sync();
+  let stop: (() => void) | undefined;
+  void appWindow
+    .onResized(() => {
+      void sync();
+    })
+    .then((unlisten) => {
+      stop = unlisten;
+    });
+  return () => {
+    stop?.();
+  };
+}
+
+/**
+ * Toggles native fullscreen.
  */
 export async function toggleNativeFullscreen(): Promise<void> {
   if (!isTauriRuntime()) {
@@ -149,11 +205,13 @@ export function bindFullscreenClass(paper: HTMLElement): () => void {
   };
   void sync();
   let stop: (() => void) | undefined;
-  void appWindow.onResized(() => {
-    void sync();
-  }).then((unlisten) => {
-    stop = unlisten;
-  });
+  void appWindow
+    .onResized(() => {
+      void sync();
+    })
+    .then((unlisten) => {
+      stop = unlisten;
+    });
   return () => {
     stop?.();
   };

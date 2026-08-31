@@ -56,6 +56,7 @@ const DISCARD_BUTTON = "Don't Save";
 const CANCEL_BUTTON = "Cancel";
 const FILE_FILTERS = [
   { name: "Markdown", extensions: ["md"] },
+  { name: "Typst", extensions: ["typ"] },
   { name: "Text", extensions: ["txt"] },
 ];
 const DOCUMENT_START_LINE = 1;

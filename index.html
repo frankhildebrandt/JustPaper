@@ -9,7 +9,14 @@
   <body>
     <div class="paper" id="paper">
       <div class="title-drag" id="title-drag" data-tauri-drag-region></div>
-      <div class="window-chrome">
+      <div class="window-chrome" id="window-chrome">
+        <button
+          type="button"
+          class="app-menu-button"
+          id="app-menu-button"
+          aria-label="Menu"
+          aria-haspopup="menu"
+        ></button>
         <div class="traffic-lights" id="traffic-lights">
           <button type="button" class="light close" id="window-close" aria-label="Close"></button>
           <button type="button" class="light minimize" id="window-minimize" aria-label="Minimize"></button>

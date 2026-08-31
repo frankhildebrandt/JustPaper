@@ -1,6 +1,6 @@
 # JustPaper
 
-A frameless typewriter on a sheet of paper. One quiet window, local markdown files, no cloud and no file tree.
+A frameless typewriter on a sheet of paper. One quiet window, local markdown and Typst files, no cloud and no file tree.
 
 Open a single note, or a folder as a project. Then jump with **⌘P** / **Ctrl+P**, search with **⇧⌘P** / **Ctrl+Shift+P**, and follow `[[wikilinks]]`. Autosave keeps the current file on disk.
 

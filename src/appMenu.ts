@@ -5,6 +5,7 @@ import {
   PredefinedMenuItem,
   Submenu,
 } from "@tauri-apps/api/menu";
+import { LogicalPosition } from "@tauri-apps/api/dpi";
 import type { DocumentBinding } from "./document";
 import {
   checkedHighlightModeItems,
@@ -32,7 +33,7 @@ import {
   type HighlightColor,
   type SettingsBinding,
 } from "./settings";
-import { toggleNativeFullscreen } from "./windowChrome";
+import { isWindowsChrome, toggleNativeFullscreen } from "./windowChrome";
 import {
   checkedViewModeItems,
   type ViewMode,
@@ -52,16 +53,106 @@ export type ProjectCommands = {
   findInDocument: () => void;
 };
 
+type MenuShortcut = {
+  accelerator: string;
+  action: () => void;
+  enabled?: () => boolean;
+};
+
+/**
+ * Returns whether a keyboard event matches a Tauri-style accelerator string.
+ */
+export function matchesAccelerator(
+  event: KeyboardEvent,
+  accelerator: string,
+): boolean {
+  const parts = accelerator.split("+").map((part) => part.trim());
+  let cmdOrCtrl = false;
+  let expectCtrl = false;
+  let expectMeta = false;
+  let expectShift = false;
+  let expectAlt = false;
+  let key = "";
+
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (lower === "cmdorctrl" || lower === "commandorcontrol") {
+      cmdOrCtrl = true;
+    } else if (lower === "cmd" || lower === "command" || lower === "super") {
+      expectMeta = true;
+    } else if (lower === "ctrl" || lower === "control") {
+      expectCtrl = true;
+    } else if (lower === "shift") {
+      expectShift = true;
+    } else if (lower === "alt" || lower === "option") {
+      expectAlt = true;
+    } else {
+      key = part;
+    }
+  }
+
+  if (cmdOrCtrl) {
+    if (!(event.ctrlKey || event.metaKey)) {
+      return false;
+    }
+  } else {
+    if (event.ctrlKey !== expectCtrl) {
+      return false;
+    }
+    if (event.metaKey !== expectMeta) {
+      return false;
+    }
+  }
+  if (event.shiftKey !== expectShift) {
+    return false;
+  }
+  if (event.altKey !== expectAlt) {
+    return false;
+  }
+
+  const expected = key.toUpperCase();
+  if (
+    expected.startsWith("F") &&
+    expected.length > 1 &&
+    !Number.isNaN(Number(expected.slice(1)))
+  ) {
+    return event.key.toUpperCase() === expected;
+  }
+  if (event.key.toUpperCase() === expected) {
+    return true;
+  }
+  if (/^\d$/.test(expected)) {
+    return event.code === `Digit${expected}` || event.code === `Numpad${expected}`;
+  }
+  if (/^[A-Z]$/.test(expected)) {
+    return event.code === `Key${expected}`;
+  }
+  return false;
+}
+
+function rememberShortcut(
+  shortcuts: MenuShortcut[],
+  accelerator: string | undefined,
+  action: (() => void) | undefined,
+  enabled?: () => boolean,
+): void {
+  if (!accelerator || !action) {
+    return;
+  }
+  shortcuts.push({ accelerator, action, enabled });
+}
+
 /**
  * Builds File menu items: New / Open / Save / Save As and recents.
  */
 async function fileMenuItems(
-  document: DocumentBinding,
+  paperDoc: DocumentBinding,
   project: ProjectCommands,
+  shortcuts: MenuShortcut[],
 ) {
-  const recents = document.recents();
+  const recents = paperDoc.recents();
   const labels = recentFileLabels(recents);
-  const inProject = document.projectRoot() !== null;
+  const inProject = paperDoc.projectRoot() !== null;
   const recentItems =
     recents.length === 0
       ? [
@@ -72,58 +163,103 @@ async function fileMenuItems(
           }),
         ]
       : await Promise.all(
-          recents.map((path, index) =>
-            MenuItem.new({
+          recents.map((path, index) => {
+            const accelerator = `CmdOrCtrl+${index + 1}`;
+            const action = (): void => {
+              void paperDoc.openRecent(path);
+            };
+            rememberShortcut(shortcuts, accelerator, action);
+            return MenuItem.new({
               id: `file-recent-${index}`,
               text: labels[index] ?? path,
-              accelerator: `CmdOrCtrl+${index + 1}`,
-              action: () => {
-                void document.openRecent(path);
-              },
-            }),
-          ),
+              accelerator,
+              action,
+            });
+          }),
         );
+
+  const newAction = (): void => {
+    void paperDoc.newDocument();
+  };
+  const openAction = (): void => {
+    void paperDoc.open();
+  };
+  const openFolderAction = (): void => {
+    void paperDoc.openFolder();
+  };
+  const saveAction = (): void => {
+    void paperDoc.save();
+  };
+  const saveAsAction = (): void => {
+    void paperDoc.saveAs();
+  };
+  const quickOpenAction = (): void => {
+    project.quickOpen();
+  };
+  const findInProjectAction = (): void => {
+    project.findInProject();
+  };
+  const jumpOutgoingAction = (): void => {
+    project.jumpOutgoing();
+  };
+  const jumpIncomingAction = (): void => {
+    project.jumpIncoming();
+  };
+  const lastOpenedAction = (): void => {
+    project.lastOpened();
+  };
+
+  rememberShortcut(shortcuts, "CmdOrCtrl+N", newAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+O", openAction);
+  rememberShortcut(shortcuts, "Shift+CmdOrCtrl+O", openFolderAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+S", saveAction);
+  rememberShortcut(shortcuts, "Shift+CmdOrCtrl+S", saveAsAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+P", quickOpenAction, () => inProject);
+  rememberShortcut(
+    shortcuts,
+    "CmdOrCtrl+Shift+P",
+    findInProjectAction,
+    () => inProject,
+  );
+  rememberShortcut(shortcuts, "CmdOrCtrl+J", jumpOutgoingAction, () => inProject);
+  rememberShortcut(
+    shortcuts,
+    "Shift+CmdOrCtrl+J",
+    jumpIncomingAction,
+    () => inProject,
+  );
+  rememberShortcut(shortcuts, "CmdOrCtrl+E", lastOpenedAction);
 
   return [
     await MenuItem.new({
       id: "file-new",
       text: "Neu",
       accelerator: "CmdOrCtrl+N",
-      action: () => {
-        void document.newDocument();
-      },
+      action: newAction,
     }),
     await MenuItem.new({
       id: "file-open",
       text: "Open",
       accelerator: "CmdOrCtrl+O",
-      action: () => {
-        void document.open();
-      },
+      action: openAction,
     }),
     await MenuItem.new({
       id: "file-open-folder",
       text: "Ordner öffnen...",
       accelerator: "Shift+CmdOrCtrl+O",
-      action: () => {
-        void document.openFolder();
-      },
+      action: openFolderAction,
     }),
     await MenuItem.new({
       id: "file-save",
       text: "Save",
       accelerator: "CmdOrCtrl+S",
-      action: () => {
-        void document.save();
-      },
+      action: saveAction,
     }),
     await MenuItem.new({
       id: "file-save-as",
       text: "Save As...",
       accelerator: "Shift+CmdOrCtrl+S",
-      action: () => {
-        void document.saveAs();
-      },
+      action: saveAsAction,
     }),
     await PredefinedMenuItem.new({ item: "Separator" }),
     await MenuItem.new({
@@ -131,44 +267,34 @@ async function fileMenuItems(
       text: "Datei suchen",
       accelerator: "CmdOrCtrl+P",
       enabled: inProject,
-      action: () => {
-        project.quickOpen();
-      },
+      action: quickOpenAction,
     }),
     await MenuItem.new({
       id: "file-find-in-project",
       text: "Im Projekt suchen",
       accelerator: "CmdOrCtrl+Shift+P",
       enabled: inProject,
-      action: () => {
-        project.findInProject();
-      },
+      action: findInProjectAction,
     }),
     await MenuItem.new({
       id: "file-jump-outgoing",
       text: "Ausgehende Links",
       accelerator: "CmdOrCtrl+J",
       enabled: inProject,
-      action: () => {
-        project.jumpOutgoing();
-      },
+      action: jumpOutgoingAction,
     }),
     await MenuItem.new({
       id: "file-jump-incoming",
       text: "Eingehende Links",
       accelerator: "Shift+CmdOrCtrl+J",
       enabled: inProject,
-      action: () => {
-        project.jumpIncoming();
-      },
+      action: jumpIncomingAction,
     }),
     await MenuItem.new({
       id: "file-last-opened",
       text: "Zuletzt geöffnet",
       accelerator: "CmdOrCtrl+E",
-      action: () => {
-        project.lastOpened();
-      },
+      action: lastOpenedAction,
     }),
     await PredefinedMenuItem.new({ item: "Separator" }),
     ...recentItems,
@@ -177,14 +303,14 @@ async function fileMenuItems(
 }
 
 /**
- * Installs the native menu bar, with file actions and view modes.
+ * Installs the native menu bar (macOS) or burger popup menu (Windows).
  */
 export async function bindAppMenu(
   view: ViewModeBinding,
   parser: ParserModeBinding,
   highlight: HighlightModeBinding,
   paragraphNav: ParagraphNavBinding,
-  document: DocumentBinding,
+  paperDoc: DocumentBinding,
   project: ProjectCommands,
   settings: SettingsBinding,
 ): Promise<() => void> {
@@ -192,11 +318,18 @@ export async function bindAppMenu(
     return () => {};
   }
 
+  const windows = isWindowsChrome();
+  const menuButton = globalThis.document.getElementById("app-menu-button");
+  let currentMenu: Menu | null = null;
+  let shortcuts: MenuShortcut[] = [];
+
   let normalItem: CheckMenuItem;
   let typewriterItem: CheckMenuItem;
   let plainItem: CheckMenuItem;
   let markdownEditItem: CheckMenuItem;
   let markdownViewItem: CheckMenuItem;
+  let typstEditItem: CheckMenuItem;
+  let typstViewItem: CheckMenuItem;
   let noneItem: CheckMenuItem;
   let paragraphItem: CheckMenuItem;
   let sentenceItem: CheckMenuItem;
@@ -230,6 +363,8 @@ export async function bindAppMenu(
     void plainItem.setChecked(checked.plain);
     void markdownEditItem.setChecked(checked.markdownEdit);
     void markdownViewItem.setChecked(checked.markdownView);
+    void typstEditItem.setChecked(checked.typstEdit);
+    void typstViewItem.setChecked(checked.typstView);
   };
 
   const selectHighlight = (mode: HighlightMode): void => {
@@ -287,6 +422,7 @@ export async function bindAppMenu(
   };
 
   const install = async (): Promise<void> => {
+    const nextShortcuts: MenuShortcut[] = [];
     const viewChecked = checkedViewModeItems(view.getViewMode());
     const parserChecked = checkedParserModeItems(parser.getParserMode());
     const highlightChecked = checkedHighlightModeItems(
@@ -331,6 +467,22 @@ export async function bindAppMenu(
       checked: parserChecked.markdownView,
       action: () => {
         selectParser("markdownView");
+      },
+    });
+    typstEditItem = await CheckMenuItem.new({
+      id: "parser-typst-edit",
+      text: "Typst Edit",
+      checked: parserChecked.typstEdit,
+      action: () => {
+        selectParser("typstEdit");
+      },
+    });
+    typstViewItem = await CheckMenuItem.new({
+      id: "parser-typst-view",
+      text: "Typst View",
+      checked: parserChecked.typstView,
+      action: () => {
+        selectParser("typstView");
       },
     });
     noneItem = await CheckMenuItem.new({
@@ -475,13 +627,17 @@ export async function bindAppMenu(
         selectAppearance("dark");
       },
     });
+
+    const fullscreenAccelerator = windows ? "F11" : "Ctrl+Cmd+F";
+    const fullscreenAction = (): void => {
+      void toggleNativeFullscreen();
+    };
+    rememberShortcut(nextShortcuts, fullscreenAccelerator, fullscreenAction);
     const fullscreenItem = await MenuItem.new({
       id: "view-fullscreen",
       text: "Vollbild",
-      accelerator: "Ctrl+Cmd+F",
-      action: () => {
-        void toggleNativeFullscreen();
-      },
+      accelerator: fullscreenAccelerator,
+      action: fullscreenAction,
     });
 
     const markdownMenu = await markdownFeatureMenuItems(
@@ -498,20 +654,35 @@ export async function bindAppMenu(
       },
     });
 
+    const appItems = windows
+      ? [
+          await PredefinedMenuItem.new({
+            item: { About: { name: "JustPaper" } },
+          }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await PredefinedMenuItem.new({ item: "Quit" }),
+        ]
+      : [
+          await PredefinedMenuItem.new({
+            item: { About: { name: "JustPaper" } },
+          }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await PredefinedMenuItem.new({ item: "Hide" }),
+          await PredefinedMenuItem.new({ item: "HideOthers" }),
+          await PredefinedMenuItem.new({ item: "Quit" }),
+        ];
     const appSubmenu = await Submenu.new({
       text: "JustPaper",
-      items: [
-        await PredefinedMenuItem.new({ item: { About: { name: "JustPaper" } } }),
-        await PredefinedMenuItem.new({ item: "Separator" }),
-        await PredefinedMenuItem.new({ item: "Hide" }),
-        await PredefinedMenuItem.new({ item: "HideOthers" }),
-        await PredefinedMenuItem.new({ item: "Quit" }),
-      ],
+      items: appItems,
     });
     const fileSubmenu = await Submenu.new({
       text: "File",
-      items: await fileMenuItems(document, project),
+      items: await fileMenuItems(paperDoc, project, nextShortcuts),
     });
+    const findInDocumentAction = (): void => {
+      project.findInDocument();
+    };
+    rememberShortcut(nextShortcuts, "CmdOrCtrl+F", findInDocumentAction);
     const editSubmenu = await Submenu.new({
       text: "Edit",
       items: [
@@ -527,9 +698,7 @@ export async function bindAppMenu(
           id: "edit-find-in-document",
           text: "Im Dokument suchen",
           accelerator: "CmdOrCtrl+F",
-          action: () => {
-            project.findInDocument();
-          },
+          action: findInDocumentAction,
         }),
       ],
     });
@@ -550,6 +719,8 @@ export async function bindAppMenu(
         plainItem,
         markdownEditItem,
         markdownViewItem,
+        typstEditItem,
+        typstViewItem,
         await PredefinedMenuItem.new({ item: "Separator" }),
         noneItem,
         paragraphItem,
@@ -577,21 +748,65 @@ export async function bindAppMenu(
       ],
     });
     const menu = await Menu.new({
-      items: [appSubmenu, fileSubmenu, editSubmenu, markdownSubmenu, viewSubmenu],
+      items: [
+        appSubmenu,
+        fileSubmenu,
+        editSubmenu,
+        markdownSubmenu,
+        viewSubmenu,
+      ],
     });
-    await menu.setAsAppMenu();
+    shortcuts = nextShortcuts;
+    currentMenu = menu;
+    if (!windows) {
+      await menu.setAsAppMenu();
+    }
   };
 
   await install();
-  const stopRecents = document.onRecentsChange(() => {
+
+  const onMenuButton = (event: MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!currentMenu || !menuButton) {
+      return;
+    }
+    const rect = menuButton.getBoundingClientRect();
+    void currentMenu.popup(new LogicalPosition(rect.left, rect.bottom + 4));
+  };
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    for (const shortcut of shortcuts) {
+      if (!matchesAccelerator(event, shortcut.accelerator)) {
+        continue;
+      }
+      if (shortcut.enabled && !shortcut.enabled()) {
+        continue;
+      }
+      event.preventDefault();
+      shortcut.action();
+      return;
+    }
+  };
+
+  if (windows) {
+    menuButton?.addEventListener("click", onMenuButton);
+    window.addEventListener("keydown", onKeyDown);
+  }
+
+  const stopRecents = paperDoc.onRecentsChange(() => {
     void install();
   });
-  const stopSession = document.onSessionChange(() => {
+  const stopSession = paperDoc.onSessionChange(() => {
     void install();
   });
 
   return () => {
     stopRecents();
     stopSession();
+    if (windows) {
+      menuButton?.removeEventListener("click", onMenuButton);
+      window.removeEventListener("keydown", onKeyDown);
+    }
   };
 }

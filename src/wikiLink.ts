@@ -189,11 +189,11 @@ export function wikiCreatePath(
 }
 
 function withMarkdownExtension(target: string): string {
-  return /\.(md|txt)$/i.test(target) ? target : `${target}.md`;
+  return /\.(md|txt|typ)$/i.test(target) ? target : `${target}.md`;
 }
 
 function wikiStem(path: string): string {
-  return path.replace(/\.(md|txt)$/i, "");
+  return path.replace(/\.(md|txt|typ)$/i, "");
 }
 
 function basename(path: string): string {

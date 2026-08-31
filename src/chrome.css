@@ -9,6 +9,12 @@
   height: 40px;
   padding: 0 12px;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.window-chrome.is-visible {
+  opacity: 1;
 }
 
 .title-drag {
@@ -20,17 +26,42 @@
   height: 16px;
 }
 
+.app-menu-button {
+  display: none;
+  position: relative;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+  appearance: none;
+  pointer-events: none;
+}
+
+.app-menu-button::before {
+  content: "";
+  position: absolute;
+  inset: 2px 1px;
+  background:
+    linear-gradient(var(--ink), var(--ink)) 0 0 / 100% 1.5px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 0 50% / 100% 1.5px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) 0 100% / 100% 1.5px no-repeat;
+  opacity: 0.72;
+}
+
+.window-chrome.is-visible .app-menu-button {
+  pointer-events: auto;
+}
+
 .traffic-lights {
   display: flex;
   gap: 8px;
   align-items: center;
-  opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
 }
 
-.traffic-lights.is-visible {
-  opacity: 1;
+.window-chrome.is-visible .traffic-lights {
   pointer-events: auto;
 }
 
@@ -54,4 +85,127 @@
 
 .light.zoom {
   background: #28c840;
+}
+
+/* Windows: full-width chrome, burger left, caption right */
+html[data-chrome="windows"] .window-chrome {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 10px;
+}
+
+html[data-chrome="windows"] .app-menu-button {
+  display: block;
+}
+
+html[data-chrome="windows"] .traffic-lights {
+  gap: 2px;
+}
+
+html[data-chrome="windows"] .light {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: transparent;
+}
+
+html[data-chrome="windows"] .light.close {
+  order: 3;
+}
+
+html[data-chrome="windows"] .light.minimize {
+  order: 1;
+}
+
+html[data-chrome="windows"] .light.zoom {
+  order: 2;
+}
+
+html[data-chrome="windows"] .light::before,
+html[data-chrome="windows"] .light::after {
+  content: none;
+  position: absolute;
+  background: var(--ink);
+  opacity: 0.72;
+}
+
+html[data-chrome="windows"] .light.minimize::before {
+  content: "";
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 1.5px;
+  margin-top: -0.75px;
+}
+
+html[data-chrome="windows"] .light.zoom:not(.is-maximized)::before {
+  content: "";
+  left: 9px;
+  top: 9px;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 1.5px solid var(--ink);
+  opacity: 0.72;
+  box-sizing: border-box;
+}
+
+html[data-chrome="windows"] .light.zoom.is-maximized::before {
+  content: "";
+  left: 8px;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+  background: transparent;
+  border: 1.5px solid var(--ink);
+  opacity: 0.72;
+  box-sizing: border-box;
+}
+
+html[data-chrome="windows"] .light.zoom.is-maximized::after {
+  content: "";
+  left: 11px;
+  top: 7px;
+  width: 8px;
+  height: 8px;
+  background: transparent;
+  border: 1.5px solid var(--ink);
+  opacity: 0.72;
+  box-sizing: border-box;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}
+
+html[data-chrome="windows"] .light.close::before,
+html[data-chrome="windows"] .light.close::after {
+  content: "";
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 1.5px;
+  margin-left: -6px;
+  margin-top: -0.75px;
+}
+
+html[data-chrome="windows"] .light.close::before {
+  transform: rotate(45deg);
+}
+
+html[data-chrome="windows"] .light.close::after {
+  transform: rotate(-45deg);
+}
+
+html[data-chrome="windows"] .light:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+html[data-chrome="windows"] .light.close:hover {
+  background: #e81123;
+}
+
+html[data-chrome="windows"] .light.close:hover::before,
+html[data-chrome="windows"] .light.close:hover::after {
+  background: #fff;
+  opacity: 1;
 }

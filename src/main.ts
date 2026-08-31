@@ -14,7 +14,7 @@ import { bindHighlightMode } from "./highlightMode";
 import { bindLinkHelper, type LinkHelperItem } from "./linkHelper";
 import { bindPalette } from "./palette";
 import { bindParagraphNav } from "./paragraphNav";
-import { bindParserMode } from "./parserMode";
+import { bindParserMode, parserModeForPath } from "./parserMode";
 import { documentDir } from "./markdown/imageSrc";
 import {
   completedWikiLink,
@@ -27,7 +27,9 @@ import { bindSettings } from "./settings";
 import { bindViewMode, textareaLayoutHost } from "./viewMode";
 import { incomingWikiLinks, outgoingWikiLinks } from "./wikiLink";
 import {
+  applyChromePlatform,
   bindFullscreenClass,
+  bindMaximizeClass,
   bindTitleDoubleClick,
   bindTrafficLights,
   bindWindowChrome,
@@ -253,6 +255,13 @@ window.addEventListener("DOMContentLoaded", () => {
     applyAssetBase();
     projectFiles = null;
     syncLinkHelper();
+    const nextMode = parserModeForPath(
+      paperDoc.path(),
+      parser.getParserMode(),
+    );
+    if (nextMode !== parser.getParserMode()) {
+      settings.setParserMode(nextMode);
+    }
   });
   parser.onCaretOrDoc(syncLinkHelper);
   parser.onScroll(syncLinkHelper);
@@ -410,7 +419,8 @@ window.addEventListener("DOMContentLoaded", () => {
     lastOpened,
     findInDocument,
   }, settings);
-  bindWindowChrome(document.documentElement, requiredElement("traffic-lights"), {
+  applyChromePlatform();
+  bindWindowChrome(document.documentElement, requiredElement("window-chrome"), {
     reveal: [requiredElement("filename-peek")],
     onChange: () => {
       filename.sync();
@@ -421,6 +431,7 @@ window.addEventListener("DOMContentLoaded", () => {
     minimize: requiredElement("window-minimize"),
     zoom: requiredElement("window-zoom"),
   });
+  bindMaximizeClass(requiredElement("window-zoom"));
   bindTitleDoubleClick(requiredElement("title-drag"));
   bindFullscreenClass(requiredElement("paper"));
 });

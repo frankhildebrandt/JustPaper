@@ -41,6 +41,12 @@ describe("parseSettings", () => {
     });
   });
 
+  it("reads a typst parser mode", () => {
+    expect(
+      parseSettings(JSON.stringify({ parserMode: "typstView" })).parserMode,
+    ).toBe("typstView");
+  });
+
   it("reads the stored graphic markdown rendering flag", () => {
     expect(
       parseSettings(JSON.stringify({ markdownGraphic: true })).markdownGraphic,

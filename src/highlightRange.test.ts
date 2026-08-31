@@ -102,6 +102,13 @@ describe("focusRange", () => {
     });
   });
 
+  it("keeps a Typst heading section in focus", () => {
+    expect(focusRange("= Title\nhello", 9, "headline", "typst")).toEqual({
+      from: 0,
+      to: 13,
+    });
+  });
+
   it("dims nothing when no heading sits above the caret", () => {
     expect(focusRange("intro\n# Title", 1, "headline")).toBeUndefined();
   });

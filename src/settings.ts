@@ -217,7 +217,9 @@ function asViewMode(value: unknown): ViewMode {
 function asParserMode(value: unknown): ParserMode {
   return value === "plain" ||
     value === "markdownEdit" ||
-    value === "markdownView"
+    value === "markdownView" ||
+    value === "typstEdit" ||
+    value === "typstView"
     ? value
     : DEFAULT_SETTINGS.parserMode;
 }

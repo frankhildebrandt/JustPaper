@@ -429,9 +429,26 @@
   }
 }
 
-.highlight-dim,
-.highlight-dim * {
-  color: var(--ink-muted);
+.md-list {
+  padding-left: 0.15em;
+}
+
+.md-math {
+  font-style: italic;
+}
+
+.md-comment {
+  color: color-mix(in srgb, var(--ink) 48%, transparent);
+}
+
+.md-hash {
+  font-family: "Courier Prime", ui-monospace, "Courier New", monospace;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.md-label,
+.md-ref {
+  color: var(--accent);
 }
 
 .markdown-host .cm-line.md-h1,

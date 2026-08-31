@@ -20,6 +20,17 @@ import { addAtxHash, removeAtxHash, type AtxEdit } from "./atxEdit";
 import { decorationSpecs, decorationRevealKey, atomicSyntaxRanges, type DecorationSpec } from "./decorationSpecs";
 import { applyHeadingCssVars } from "./headingStyle";
 import { parseMarkdown, type Block } from "./parse";
+import {
+  typstAtomicSyntaxRanges,
+  typstDecorationRevealKey,
+  typstDecorationSpecs,
+} from "../typst/decorationSpecs";
+import {
+  addHeadingMark,
+  removeHeadingMark,
+  type HeadingEdit,
+} from "../typst/headingEdit";
+import { parseTypst, typstLinkAt } from "../typst/parse";
 import { CodeWidget, HrWidget, QuoteWidget, TableWidget } from "./graphicWidgets";
 import {
   caretRevealsTable,
@@ -57,11 +68,15 @@ import { allowCaretReveal, pointerSnapSelection, selectionLockHolds } from "./re
 
 /** Last known caret screen x so blank lines do not reset the visual column. */
 let lastCaretScreenX: number | undefined;
+
+export type PaperLanguage = "markdown" | "typst";
+export type PaperSurface = "edit" | "view";
 const setShowMarks = StateEffect.define<boolean>();
 const setHighlightModeEffect = StateEffect.define<HighlightMode>();
 const setFeaturesEffect = StateEffect.define<MarkdownFeatures>();
 const setAssetBaseEffect = StateEffect.define<string | null>();
 const setGraphicEffect = StateEffect.define<boolean>();
+const setLanguageEffect = StateEffect.define<PaperLanguage>();
 const setPointerSelecting = StateEffect.define<boolean>();
 
 const showMarksField = StateField.define<boolean>({
@@ -124,6 +139,18 @@ const graphicField = StateField.define<boolean>({
   },
 });
 
+const languageField = StateField.define<PaperLanguage>({
+  create: () => "markdown",
+  update(value, transaction): PaperLanguage {
+    for (const effect of transaction.effects) {
+      if (effect.is(setLanguageEffect)) {
+        return effect.value;
+      }
+    }
+    return value;
+  },
+});
+
 const markdownDecorations = StateField.define<DecorationSet>({
   create(state): DecorationSet {
     return decorationsFor(
@@ -132,6 +159,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
       state.field(featuresField),
       state.field(assetBaseField),
       state.field(graphicField),
+      state.field(languageField),
       state.selection.main.head,
     );
   },
@@ -140,6 +168,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
     const features = transaction.state.field(featuresField);
     const assetBase = transaction.state.field(assetBaseField);
     const graphic = transaction.state.field(graphicField);
+    const language = transaction.state.field(languageField);
     const caret = transaction.state.selection.main.head;
     if (
       transaction.docChanged ||
@@ -148,7 +177,8 @@ const markdownDecorations = StateField.define<DecorationSet>({
           effect.is(setShowMarks) ||
           effect.is(setFeaturesEffect) ||
           effect.is(setAssetBaseEffect) ||
-          effect.is(setGraphicEffect),
+          effect.is(setGraphicEffect) ||
+          effect.is(setLanguageEffect),
       )
     ) {
       return decorationsFor(
@@ -157,6 +187,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
         features,
         assetBase,
         graphic,
+        language,
         caret,
       );
     }
@@ -170,6 +201,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
         features,
         assetBase,
         graphic,
+        language,
         caret,
       );
     }
@@ -181,26 +213,24 @@ const markdownDecorations = StateField.define<DecorationSet>({
       transaction.selection
     ) {
       const source = transaction.state.doc.toString();
-      const blocks = parseMarkdown(source, features);
-      const nextKey = decorationRevealKey(blocks, {
-        showMarks,
-        graphic,
-        source,
-        caret,
-      });
-      const prevKey = decorationRevealKey(blocks, {
-        showMarks,
-        graphic,
-        source,
-        caret: transaction.startState.selection.main.head,
-      });
-      if (nextKey !== prevKey) {
+      if (
+        revealKey(source, language, features, showMarks, graphic, caret) !==
+        revealKey(
+          source,
+          language,
+          features,
+          showMarks,
+          graphic,
+          transaction.startState.selection.main.head,
+        )
+      ) {
         return decorationsFor(
           source,
           showMarks,
           features,
           assetBase,
           graphic,
+          language,
           caret,
         );
       }
@@ -343,7 +373,7 @@ const paperTheme = EditorView.theme({
   },
 });
 
-export type MarkdownSurface = "markdownEdit" | "markdownView";
+export type MarkdownSurface = PaperSurface;
 
 export type CaretScreenBox = {
   left: number;
@@ -360,7 +390,8 @@ export type MarkdownEditor = {
   replaceRange: (from: number, to: number, text: string) => void;
   offsetAtClientPoint: (clientX: number, clientY: number) => number | undefined;
   revealCaret: () => void;
-  setSurface: (surface: MarkdownSurface) => void;
+  setSurface: (surface: PaperSurface) => void;
+  setLanguage: (language: PaperLanguage) => void;
   setHighlightMode: (mode: HighlightMode) => void;
   setFeatures: (features: MarkdownFeatures) => void;
   setAssetBase: (dir: string | null) => void;
@@ -387,6 +418,15 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
 
   const followAt = (current: EditorView, offset: number): boolean => {
     const source = current.state.doc.toString();
+    const language = current.state.field(languageField);
+    if (language === "typst") {
+      const link = typstLinkAt(source, offset);
+      if (link) {
+        void openExternalUrl(link.href);
+        return true;
+      }
+      return false;
+    }
     const features = current.state.field(featuresField);
     if (features.wiki) {
       const wiki = wikiLinkAt(source, offset);
@@ -414,11 +454,12 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         featuresField,
         assetBaseField,
         graphicField,
+        languageField,
         markdownDecorations,
         highlightModeField,
         highlightDecorations,
         headingPrefixAtoms(),
-        atxKeymap(),
+        headingKeymap(),
         graphicNavKeymap(),
         history(),
         keymap.of([
@@ -663,14 +704,17 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     revealCaret: (): void => {
       revealCaretLine(view.scrollDOM, measureMarkdownCaretTopPx(view));
     },
-    setSurface: (surface: MarkdownSurface): void => {
-      const showMarks = surface === "markdownEdit";
+    setSurface: (surface: PaperSurface): void => {
+      const showMarks = surface === "edit";
       view.dispatch({
         effects: [
           editable.reconfigure(EditorView.editable.of(showMarks)),
           setShowMarks.of(showMarks),
         ],
       });
+    },
+    setLanguage: (language: PaperLanguage): void => {
+      view.dispatch({ effects: setLanguageEffect.of(language) });
     },
     setHighlightMode: (mode: HighlightMode): void => {
       view.dispatch({ effects: setHighlightModeEffect.of(mode) });
@@ -723,14 +767,21 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
 function headingPrefixAtoms() {
   return EditorView.atomicRanges.of((view) => {
     const source = view.state.doc.toString();
-    const features = view.state.field(featuresField);
-    const blocks = parseMarkdown(source, features);
-    const ranges = atomicSyntaxRanges(blocks, {
-      showMarks: view.state.field(showMarksField),
-      graphic: view.state.field(graphicField),
-      source,
-      caret: view.state.selection.main.head,
-    });
+    const language = view.state.field(languageField);
+    const showMarks = view.state.field(showMarksField);
+    const caret = view.state.selection.main.head;
+    const ranges =
+      language === "typst"
+        ? typstAtomicSyntaxRanges(parseTypst(source), {
+            showMarks,
+            caret,
+          })
+        : atomicSyntaxRanges(parseMarkdown(source, view.state.field(featuresField)), {
+            showMarks,
+            graphic: view.state.field(graphicField),
+            source,
+            caret,
+          });
     return Decoration.set(
       ranges
         .filter((range) => range.to > range.from)
@@ -740,16 +791,35 @@ function headingPrefixAtoms() {
   });
 }
 
-function atxKeymap() {
+function headingKeymap() {
   return Prec.high(
     keymap.of([
       {
         key: "#",
-        run: (view) => applyAtxEdit(view, (doc, pos) => addAtxHash(doc, pos)),
+        run: (view) =>
+          view.state.field(languageField) === "markdown" &&
+          applyAtxEdit(view, (doc, pos) => addAtxHash(doc, pos)),
+      },
+      {
+        key: "=",
+        run: (view) =>
+          view.state.field(languageField) === "typst" &&
+          applyHeadingEdit(view, (doc, pos) => addHeadingMark(doc, pos)),
       },
       {
         key: "Backspace",
-        run: (view) => applyAtxEdit(view, (doc, pos) => removeAtxHash(doc, pos)),
+        run: (view) => {
+          const language = view.state.field(languageField);
+          if (language === "typst") {
+            return applyHeadingEdit(view, (doc, pos) =>
+              removeHeadingMark(doc, pos),
+            );
+          }
+          if (language === "markdown") {
+            return applyAtxEdit(view, (doc, pos) => removeAtxHash(doc, pos));
+          }
+          return false;
+        },
       },
     ]),
   );
@@ -794,7 +864,9 @@ function enterGraphic(
   const graphic = view.state.field(graphicField);
   const showMarks = view.state.field(showMarksField);
   const features = view.state.field(featuresField);
-  const blocks = parseMarkdown(source, features);
+  const language = view.state.field(languageField);
+  const blocks =
+    language === "markdown" ? parseMarkdown(source, features) : [];
   const spans = graphic && showMarks ? graphicSpans(blocks) : [];
   const caret = view.state.selection.main.head;
 
@@ -1163,11 +1235,34 @@ function applyAtxEdit(
   return true;
 }
 
+function applyHeadingEdit(
+  view: EditorView,
+  edit: (doc: string, pos: number) => HeadingEdit | undefined,
+): boolean {
+  if (!view.state.facet(EditorView.editable)) {
+    return false;
+  }
+  const selection = view.state.selection.main;
+  if (!selection.empty) {
+    return false;
+  }
+  const next = edit(view.state.doc.toString(), selection.head);
+  if (!next) {
+    return false;
+  }
+  view.dispatch({
+    changes: { from: next.from, to: next.to, insert: next.insert },
+    selection: { anchor: next.caret },
+  });
+  return true;
+}
+
 function decorationsForHighlight(state: EditorState): DecorationSet {
   const ranges = dimRanges(
     state.doc.toString(),
     state.selection.main.head,
     state.field(highlightModeField),
+    state.field(languageField),
   );
   const mark = Decoration.mark({ class: "highlight-dim" });
   return Decoration.set(
@@ -1178,21 +1273,44 @@ function decorationsForHighlight(state: EditorState): DecorationSet {
   );
 }
 
+function revealKey(
+  source: string,
+  language: PaperLanguage,
+  features: MarkdownFeatures,
+  showMarks: boolean,
+  graphic: boolean,
+  caret: number,
+): string {
+  if (language === "typst") {
+    return typstDecorationRevealKey(parseTypst(source), { showMarks, caret });
+  }
+  return decorationRevealKey(parseMarkdown(source, features), {
+    showMarks,
+    graphic,
+    source,
+    caret,
+  });
+}
+
 function decorationsFor(
   source: string,
   showMarks: boolean,
   features: MarkdownFeatures,
   assetBase: string | null,
   graphic: boolean,
+  language: PaperLanguage,
   caret: number,
 ): DecorationSet {
-  const specs = decorationSpecs(parseMarkdown(source, features), {
-    showMarks,
-    graphic,
-    source,
-    caret,
-    features,
-  });
+  const specs =
+    language === "typst"
+      ? typstDecorationSpecs(parseTypst(source), { showMarks, caret })
+      : decorationSpecs(parseMarkdown(source, features), {
+          showMarks,
+          graphic,
+          source,
+          caret,
+          features,
+        });
   return Decoration.set(
     specs.flatMap((spec) =>
       specToRanges(spec, assetBase, features.externalImage),
@@ -1225,6 +1343,9 @@ function specToRanges(
   }
   if (spec.kind === "line-todo") {
     return [Decoration.line({ class: "md-todo" }).range(spec.from)];
+  }
+  if (spec.kind === "line-list") {
+    return [Decoration.line({ class: "md-list" }).range(spec.from)];
   }
   if (spec.from >= spec.to) {
     return [];

@@ -1,5 +1,8 @@
 import type { HighlightMode } from "./highlightMode";
-import { parseMarkdown, type HeadingBlock } from "./markdown/parse";
+import { parseMarkdown } from "./markdown/parse";
+import { parseTypst } from "./typst/parse";
+
+export type HeadlineLanguage = "markdown" | "typst";
 
 export type SourceRange = {
   from: number;
@@ -14,6 +17,7 @@ export function focusRange(
   source: string,
   caret: number,
   mode: HighlightMode,
+  language: HeadlineLanguage = "markdown",
 ): SourceRange | undefined {
   if (mode === "none") {
     return undefined;
@@ -26,7 +30,7 @@ export function focusRange(
     return rangeAtCaret(sentenceRanges(source, paragraph), caret);
   }
   if (mode === "headline") {
-    return headlineRange(source, caret);
+    return headlineRange(source, caret, language);
   }
   return undefined;
 }
@@ -38,8 +42,9 @@ export function dimRanges(
   source: string,
   caret: number,
   mode: HighlightMode,
+  language: HeadlineLanguage = "markdown",
 ): SourceRange[] {
-  const focus = focusRange(source, caret, mode);
+  const focus = focusRange(source, caret, mode, language);
   if (!focus || (focus.from <= 0 && focus.to >= source.length)) {
     return [];
   }
@@ -116,16 +121,15 @@ function sentenceRanges(source: string, paragraph: SourceRange): SourceRange[] {
 function headlineRange(
   source: string,
   caret: number,
+  language: HeadlineLanguage,
 ): SourceRange | undefined {
-  const headings = parseMarkdown(source).filter(
-    (block): block is HeadingBlock => block.kind === "heading",
-  );
+  const headings = headingSections(source, language);
   if (headings.length === 0) {
     return undefined;
   }
 
   const pos = Math.min(Math.max(caret, 0), source.length);
-  let current: HeadingBlock | undefined;
+  let current: SectionHeading | undefined;
   for (const heading of headings) {
     if (heading.from <= pos) {
       current = heading;
@@ -143,6 +147,26 @@ function headlineRange(
     }
   }
   return { from: current.from, to: sectionEnd };
+}
+
+type SectionHeading = {
+  level: number;
+  from: number;
+};
+
+function headingSections(
+  source: string,
+  language: HeadlineLanguage,
+): SectionHeading[] {
+  const blocks =
+    language === "typst" ? parseTypst(source) : parseMarkdown(source);
+  const headings: SectionHeading[] = [];
+  for (const block of blocks) {
+    if (block.kind === "heading") {
+      headings.push({ level: block.level, from: block.from });
+    }
+  }
+  return headings;
 }
 
 /**

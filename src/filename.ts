@@ -8,7 +8,13 @@ export function displayName(path: string | null): string {
     return UNTITLED;
   }
   const name = basename(path);
-  return name.endsWith(".md") ? name.slice(0, -3) : name;
+  if (name.endsWith(".md")) {
+    return name.slice(0, -3);
+  }
+  if (name.endsWith(".typ")) {
+    return name.slice(0, -4);
+  }
+  return name;
 }
 
 /**
