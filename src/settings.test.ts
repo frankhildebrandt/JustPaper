@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MARKDOWN_FEATURES } from "./markdown/features";
+import { DEFAULT_TYPST_FEATURES } from "./typst/features";
 import {
   DEFAULT_SETTINGS,
   accentHex,
@@ -38,6 +39,7 @@ describe("parseSettings", () => {
       highlightMode: "sentence",
       markdownFeatures: DEFAULT_MARKDOWN_FEATURES,
       markdownGraphic: false,
+      typstFeatures: DEFAULT_TYPST_FEATURES,
     });
   });
 
@@ -51,6 +53,19 @@ describe("parseSettings", () => {
     expect(
       parseSettings(JSON.stringify({ markdownGraphic: true })).markdownGraphic,
     ).toBe(true);
+  });
+
+  it("reads stored typst feature flags and fills missing keys", () => {
+    expect(
+      parseSettings(
+        JSON.stringify({
+          typstFeatures: { math: false, unknown: true },
+        }),
+      ).typstFeatures,
+    ).toEqual({
+      ...DEFAULT_TYPST_FEATURES,
+      math: false,
+    });
   });
 
   it("reads stored markdown feature flags and fills missing keys", () => {
@@ -96,6 +111,10 @@ describe("serializeSettings", () => {
         image: false,
       },
       markdownGraphic: true,
+      typstFeatures: {
+        ...DEFAULT_TYPST_FEATURES,
+        hash: false,
+      },
     };
     expect(parseSettings(serializeSettings(settings))).toEqual(settings);
   });

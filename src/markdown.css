@@ -437,18 +437,23 @@
   font-style: italic;
 }
 
-.md-comment {
-  color: color-mix(in srgb, var(--ink) 48%, transparent);
-}
-
+.md-comment,
 .md-hash {
-  font-family: "Courier Prime", ui-monospace, "Courier New", monospace;
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-style: italic;
+  color: color-mix(in srgb, var(--ink) 48%, transparent);
 }
 
 .md-label,
 .md-ref {
   color: var(--accent);
+}
+
+.md-linebreak {
+  display: block;
+}
+
+.md-glyph {
+  font-family: inherit;
 }
 
 .markdown-host .cm-line.md-h1,

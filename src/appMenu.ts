@@ -23,6 +23,8 @@ import {
 } from "./parserMode";
 import { markdownFeatureMenuItems } from "./markdown/menu";
 import type { MarkdownFeature } from "./markdown/features";
+import { typstFeatureMenuItems } from "./typst/menu";
+import type { TypstFeature } from "./typst/features";
 import { recentFileLabels } from "./recentFiles";
 import {
   checkedAppearanceItems,
@@ -187,6 +189,9 @@ async function fileMenuItems(
   const openFolderAction = (): void => {
     void paperDoc.openFolder();
   };
+  const openTypstAction = (): void => {
+    void paperDoc.openTypstDocument();
+  };
   const saveAction = (): void => {
     void paperDoc.save();
   };
@@ -248,6 +253,11 @@ async function fileMenuItems(
       text: "Ordner öffnen...",
       accelerator: "Shift+CmdOrCtrl+O",
       action: openFolderAction,
+    }),
+    await MenuItem.new({
+      id: "file-open-typst",
+      text: "Typst-Dokument öffnen...",
+      action: openTypstAction,
     }),
     await MenuItem.new({
       id: "file-save",
@@ -348,6 +358,7 @@ export async function bindAppMenu(
   let lightItem: CheckMenuItem;
   let darkItem: CheckMenuItem;
   let featureItems = {} as Record<MarkdownFeature, CheckMenuItem>;
+  let typstFeatureItems = {} as Record<TypstFeature, CheckMenuItem>;
   let graphicItem: CheckMenuItem;
 
   const selectView = (mode: ViewMode): void => {
@@ -419,6 +430,12 @@ export async function bindAppMenu(
     const enabled = !settings.get().markdownGraphic;
     settings.setMarkdownGraphic(enabled);
     void graphicItem.setChecked(enabled);
+  };
+
+  const toggleTypstFeature = (id: TypstFeature): void => {
+    const enabled = !settings.get().typstFeatures[id];
+    settings.setTypstFeature(id, enabled);
+    void typstFeatureItems[id].setChecked(enabled);
   };
 
   const install = async (): Promise<void> => {
@@ -653,6 +670,11 @@ export async function bindAppMenu(
         toggleMarkdownGraphic();
       },
     });
+    const typstMenu = await typstFeatureMenuItems(
+      settings.get().typstFeatures,
+      toggleTypstFeature,
+    );
+    typstFeatureItems = typstMenu.byId;
 
     const appItems = windows
       ? [
@@ -710,6 +732,10 @@ export async function bindAppMenu(
         ...markdownMenu.items,
       ],
     });
+    const typstSubmenu = await Submenu.new({
+      text: "Typst",
+      items: typstMenu.items,
+    });
     const viewSubmenu = await Submenu.new({
       text: "View",
       items: [
@@ -753,6 +779,7 @@ export async function bindAppMenu(
         fileSubmenu,
         editSubmenu,
         markdownSubmenu,
+        typstSubmenu,
         viewSubmenu,
       ],
     });

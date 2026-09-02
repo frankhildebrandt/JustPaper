@@ -23,6 +23,7 @@ describe("parseStoredSession", () => {
       root: "/vault",
       lastFile: "/vault/Hello.md",
       carets: { "/vault/Hello.md": 12, "/vault/Note.md": 3 },
+      typstMain: null,
     });
   });
 
@@ -39,6 +40,25 @@ describe("parseStoredSession", () => {
       root: "/vault",
       lastFile: "/vault/Hello.md",
       carets: { "/vault/Hello.md": 9 },
+      typstMain: null,
+    });
+  });
+
+      it("reads a Typst main document", () => {
+    expect(
+      parseStoredSession(
+        JSON.stringify({
+          root: "/vault",
+          lastFile: "/vault/kapitel/00.typ",
+          carets: {},
+          typstMain: "/vault/main.typ",
+        }),
+      ),
+    ).toEqual({
+      root: "/vault",
+      lastFile: "/vault/kapitel/00.typ",
+      carets: {},
+      typstMain: "/vault/main.typ",
     });
   });
 
@@ -93,12 +113,13 @@ describe("serializeStoredSession", () => {
       root: "/vault",
       lastFile: "/vault/Hello.md",
       carets: { "/vault/Hello.md": 7 },
+      typstMain: "/vault/main.typ",
     };
     expect(parseStoredSession(serializeStoredSession(stored))).toEqual(stored);
   });
 
   it("round-trips an untitled session without a project", () => {
-    const stored = { root: null, lastFile: null, carets: {} };
+    const stored = { root: null, lastFile: null, carets: {}, typstMain: null };
     expect(parseStoredSession(serializeStoredSession(stored))).toEqual(stored);
   });
 });

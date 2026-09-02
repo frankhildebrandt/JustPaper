@@ -51,4 +51,10 @@ describe("untitledCreatePath", () => {
   it("does not double a typed .md extension", () => {
     expect(untitledCreatePath("/vault", "Hello.md")).toBe("/vault/Hello.md");
   });
+
+  it("creates a typst file when the template is a .typ note", () => {
+    expect(untitledCreatePath("/vault", "Hello", "note.typ")).toBe(
+      "/vault/Hello.typ",
+    );
+  });
 });

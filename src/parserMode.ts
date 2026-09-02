@@ -1,6 +1,7 @@
 import { linesPerPage, offsetAfterPage, offsetAtLine } from "./caret";
 import { bindMarkdownEditor } from "./markdown/editor";
 import type { MarkdownFeatures } from "./markdown/features";
+import type { TypstFeatures } from "./typst/features";
 import type { HighlightMode } from "./highlightMode";
 import { LINE_CAPACITY } from "./pageLayout";
 import { measureCaretTopPx, revealCaretLine, textareaOffsetAtClientPoint } from "./typewriter";
@@ -98,9 +99,11 @@ export type ParserModeBinding = {
   onChange: (listener: () => void) => () => void;
   onCaretOrDoc: (listener: () => void) => () => void;
   setWikiFollow: (handler: ((target: string) => void) | undefined) => void;
+  setIncludeFollow: (handler: ((target: string) => void) | undefined) => void;
   applyHighlightMode: (mode: HighlightMode) => void;
   setMarkdownFeatures: (features: MarkdownFeatures) => void;
   setMarkdownGraphic: (enabled: boolean) => void;
+  setTypstFeatures: (features: TypstFeatures) => void;
   setAssetBase: (dir: string | null) => void;
   focus: () => void;
   disconnect: () => void;
@@ -359,6 +362,9 @@ export function bindParserMode(
       wikiFollow = handler;
       markdown.setWikiFollow(handler);
     },
+    setIncludeFollow: (handler): void => {
+      markdown.setIncludeFollow(handler);
+    },
     applyHighlightMode: (mode: HighlightMode): void => {
       markdown.setHighlightMode(mode);
     },
@@ -367,6 +373,9 @@ export function bindParserMode(
     },
     setMarkdownGraphic: (enabled: boolean): void => {
       markdown.setGraphic(enabled);
+    },
+    setTypstFeatures: (features: TypstFeatures): void => {
+      markdown.setTypstFeatures(features);
     },
     setAssetBase: (dir: string | null): void => {
       markdown.setAssetBase(dir);

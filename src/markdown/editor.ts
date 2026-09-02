@@ -30,6 +30,7 @@ import {
   removeHeadingMark,
   type HeadingEdit,
 } from "../typst/headingEdit";
+import { typstIncludeAt } from "../typst/includes";
 import { parseTypst, typstLinkAt } from "../typst/parse";
 import { CodeWidget, HrWidget, QuoteWidget, TableWidget } from "./graphicWidgets";
 import {
@@ -55,6 +56,10 @@ import {
   DEFAULT_MARKDOWN_FEATURES,
   type MarkdownFeatures,
 } from "./features";
+import {
+  DEFAULT_TYPST_FEATURES,
+  type TypstFeatures,
+} from "../typst/features";
 import { offsetAtLine } from "../caret";
 import type { HighlightMode } from "../highlightMode";
 import { dimRanges } from "../highlightRange";
@@ -74,6 +79,7 @@ export type PaperSurface = "edit" | "view";
 const setShowMarks = StateEffect.define<boolean>();
 const setHighlightModeEffect = StateEffect.define<HighlightMode>();
 const setFeaturesEffect = StateEffect.define<MarkdownFeatures>();
+const setTypstFeaturesEffect = StateEffect.define<TypstFeatures>();
 const setAssetBaseEffect = StateEffect.define<string | null>();
 const setGraphicEffect = StateEffect.define<boolean>();
 const setLanguageEffect = StateEffect.define<PaperLanguage>();
@@ -108,6 +114,18 @@ const featuresField = StateField.define<MarkdownFeatures>({
   update(value, transaction): MarkdownFeatures {
     for (const effect of transaction.effects) {
       if (effect.is(setFeaturesEffect)) {
+        return effect.value;
+      }
+    }
+    return value;
+  },
+});
+
+const typstFeaturesField = StateField.define<TypstFeatures>({
+  create: () => DEFAULT_TYPST_FEATURES,
+  update(value, transaction): TypstFeatures {
+    for (const effect of transaction.effects) {
+      if (effect.is(setTypstFeaturesEffect)) {
         return effect.value;
       }
     }
@@ -157,6 +175,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
       state.doc.toString(),
       state.field(showMarksField),
       state.field(featuresField),
+      state.field(typstFeaturesField),
       state.field(assetBaseField),
       state.field(graphicField),
       state.field(languageField),
@@ -166,6 +185,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
   update(current, transaction): DecorationSet {
     const showMarks = transaction.state.field(showMarksField);
     const features = transaction.state.field(featuresField);
+    const typstFeatures = transaction.state.field(typstFeaturesField);
     const assetBase = transaction.state.field(assetBaseField);
     const graphic = transaction.state.field(graphicField);
     const language = transaction.state.field(languageField);
@@ -176,6 +196,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
         (effect) =>
           effect.is(setShowMarks) ||
           effect.is(setFeaturesEffect) ||
+          effect.is(setTypstFeaturesEffect) ||
           effect.is(setAssetBaseEffect) ||
           effect.is(setGraphicEffect) ||
           effect.is(setLanguageEffect),
@@ -185,6 +206,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
         transaction.state.doc.toString(),
         showMarks,
         features,
+        typstFeatures,
         assetBase,
         graphic,
         language,
@@ -199,6 +221,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
         transaction.state.doc.toString(),
         showMarks,
         features,
+        typstFeatures,
         assetBase,
         graphic,
         language,
@@ -214,11 +237,20 @@ const markdownDecorations = StateField.define<DecorationSet>({
     ) {
       const source = transaction.state.doc.toString();
       if (
-        revealKey(source, language, features, showMarks, graphic, caret) !==
         revealKey(
           source,
           language,
           features,
+          typstFeatures,
+          showMarks,
+          graphic,
+          caret,
+        ) !==
+        revealKey(
+          source,
+          language,
+          features,
+          typstFeatures,
           showMarks,
           graphic,
           transaction.startState.selection.main.head,
@@ -228,6 +260,7 @@ const markdownDecorations = StateField.define<DecorationSet>({
           source,
           showMarks,
           features,
+          typstFeatures,
           assetBase,
           graphic,
           language,
@@ -394,6 +427,7 @@ export type MarkdownEditor = {
   setLanguage: (language: PaperLanguage) => void;
   setHighlightMode: (mode: HighlightMode) => void;
   setFeatures: (features: MarkdownFeatures) => void;
+  setTypstFeatures: (features: TypstFeatures) => void;
   setAssetBase: (dir: string | null) => void;
   setGraphic: (enabled: boolean) => void;
   setLinkHelperKeys: (handler: ((key: string) => boolean) | undefined) => void;
@@ -401,6 +435,7 @@ export type MarkdownEditor = {
   typewriterTarget: TypewriterTarget;
   onChange: (listener: () => void) => () => void;
   setWikiFollow: (handler: ((target: string) => void) | undefined) => void;
+  setIncludeFollow: (handler: ((target: string) => void) | undefined) => void;
   focus: () => void;
   destroy: () => void;
 };
@@ -414,16 +449,27 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
   const caretListeners = new Set<() => void>();
   const changeListeners = new Set<() => void>();
   let wikiFollow: ((target: string) => void) | undefined;
+  let includeFollow: ((target: string) => void) | undefined;
   let linkHelperKeys: ((key: string) => boolean) | undefined;
 
   const followAt = (current: EditorView, offset: number): boolean => {
     const source = current.state.doc.toString();
     const language = current.state.field(languageField);
     if (language === "typst") {
-      const link = typstLinkAt(source, offset);
-      if (link) {
-        void openExternalUrl(link.href);
-        return true;
+      const features = current.state.field(typstFeaturesField);
+      if (features.link) {
+        const link = typstLinkAt(source, offset, features);
+        if (link) {
+          void openExternalUrl(link.href);
+          return true;
+        }
+      }
+      if (features.hash) {
+        const include = typstIncludeAt(source, offset);
+        if (include && includeFollow) {
+          includeFollow(include.path);
+          return true;
+        }
       }
       return false;
     }
@@ -452,6 +498,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         showMarksField,
         pointerSelectingField,
         featuresField,
+        typstFeaturesField,
         assetBaseField,
         graphicField,
         languageField,
@@ -722,6 +769,9 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     setFeatures: (features: MarkdownFeatures): void => {
       view.dispatch({ effects: setFeaturesEffect.of(features) });
     },
+    setTypstFeatures: (features: TypstFeatures): void => {
+      view.dispatch({ effects: setTypstFeaturesEffect.of(features) });
+    },
     setAssetBase: (dir: string | null): void => {
       view.dispatch({ effects: setAssetBaseEffect.of(dir) });
     },
@@ -738,6 +788,9 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     },
     setWikiFollow: (handler): void => {
       wikiFollow = handler;
+    },
+    setIncludeFollow: (handler): void => {
+      includeFollow = handler;
     },
     setLinkHelperKeys: (handler): void => {
       linkHelperKeys = handler;
@@ -772,10 +825,14 @@ function headingPrefixAtoms() {
     const caret = view.state.selection.main.head;
     const ranges =
       language === "typst"
-        ? typstAtomicSyntaxRanges(parseTypst(source), {
-            showMarks,
-            caret,
-          })
+        ? typstAtomicSyntaxRanges(
+            parseTypst(source, view.state.field(typstFeaturesField)),
+            {
+              showMarks,
+              caret,
+              source,
+            },
+          )
         : atomicSyntaxRanges(parseMarkdown(source, view.state.field(featuresField)), {
             showMarks,
             graphic: view.state.field(graphicField),
@@ -1242,6 +1299,9 @@ function applyHeadingEdit(
   if (!view.state.facet(EditorView.editable)) {
     return false;
   }
+  if (!view.state.field(typstFeaturesField).heading) {
+    return false;
+  }
   const selection = view.state.selection.main;
   if (!selection.empty) {
     return false;
@@ -1277,12 +1337,17 @@ function revealKey(
   source: string,
   language: PaperLanguage,
   features: MarkdownFeatures,
+  typstFeatures: TypstFeatures,
   showMarks: boolean,
   graphic: boolean,
   caret: number,
 ): string {
   if (language === "typst") {
-    return typstDecorationRevealKey(parseTypst(source), { showMarks, caret });
+    return typstDecorationRevealKey(parseTypst(source, typstFeatures), {
+      showMarks,
+      caret,
+      source,
+    });
   }
   return decorationRevealKey(parseMarkdown(source, features), {
     showMarks,
@@ -1296,6 +1361,7 @@ function decorationsFor(
   source: string,
   showMarks: boolean,
   features: MarkdownFeatures,
+  typstFeatures: TypstFeatures,
   assetBase: string | null,
   graphic: boolean,
   language: PaperLanguage,
@@ -1303,7 +1369,11 @@ function decorationsFor(
 ): DecorationSet {
   const specs =
     language === "typst"
-      ? typstDecorationSpecs(parseTypst(source), { showMarks, caret })
+      ? typstDecorationSpecs(parseTypst(source, typstFeatures), {
+          showMarks,
+          caret,
+          source,
+        })
       : decorationSpecs(parseMarkdown(source, features), {
           showMarks,
           graphic,
@@ -1414,6 +1484,20 @@ function specToRanges(
       }).range(spec.from, spec.to),
     ];
   }
+  if (spec.kind === "linebreak-widget") {
+    return [
+      Decoration.replace({
+        widget: new LinebreakWidget(),
+      }).range(spec.from, spec.to),
+    ];
+  }
+  if (spec.kind === "glyph-widget") {
+    return [
+      Decoration.replace({
+        widget: new GlyphWidget(spec.glyph ?? ""),
+      }).range(spec.from, spec.to),
+    ];
+  }
   if (spec.kind === "hide") {
     return [Decoration.replace({}).range(spec.from, spec.to)];
   }
@@ -1426,6 +1510,35 @@ function specToRanges(
   return [
     Decoration.mark({ class: `md-${spec.kind}` }).range(spec.from, spec.to),
   ];
+}
+
+class LinebreakWidget extends WidgetType {
+  eq(): boolean {
+    return true;
+  }
+
+  toDOM(): HTMLElement {
+    const breakEl = document.createElement("br");
+    breakEl.className = "md-linebreak";
+    return breakEl;
+  }
+}
+
+class GlyphWidget extends WidgetType {
+  constructor(readonly glyph: string) {
+    super();
+  }
+
+  eq(other: GlyphWidget): boolean {
+    return this.glyph === other.glyph;
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement("span");
+    el.className = "md-glyph";
+    el.textContent = this.glyph;
+    return el;
+  }
 }
 
 class TodoWidget extends WidgetType {

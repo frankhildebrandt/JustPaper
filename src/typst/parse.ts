@@ -1,4 +1,8 @@
 import { parseFence } from "../markdown/parseFence";
+import {
+  DEFAULT_TYPST_FEATURES,
+  type TypstFeatures,
+} from "./features";
 
 export type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -49,10 +53,45 @@ export type RefSpan = {
   to: number;
 };
 
+export type LinebreakSpan = {
+  kind: "linebreak";
+  from: number;
+  to: number;
+};
+
+export type SmartQuoteSpan = {
+  kind: "smartquote";
+  from: number;
+  to: number;
+  glyph: string;
+};
+
+export type SymbolSpan = {
+  kind: "symbol";
+  from: number;
+  to: number;
+  glyph: string;
+};
+
+export type TypstTableCell = {
+  from: number;
+  to: number;
+  children: InlineSpan[];
+};
+
+export type TypstTableGrid = {
+  header: TypstTableCell[];
+  rows: TypstTableCell[][];
+};
+
 export type HashSpan = {
   kind: "hash";
   from: number;
   to: number;
+  name: string;
+  imageSrc: string | undefined;
+  textStyle: "strong" | "em" | undefined;
+  table: TypstTableGrid | undefined;
   code: MarkRange;
   contentOpen: MarkRange | undefined;
   contentClose: MarkRange | undefined;
@@ -66,6 +105,9 @@ export type InlineSpan =
   | LinkSpan
   | LabelSpan
   | RefSpan
+  | LinebreakSpan
+  | SmartQuoteSpan
+  | SymbolSpan
   | HashSpan;
 
 export type ParagraphBlock = {
@@ -117,10 +159,17 @@ const STATEMENT_KEYWORDS = new Set([
   "include",
 ]);
 
+const MARKUP_ESCAPE =
+  /[\\\[\]{}()*_`$#<>@\/"'~\-.=+?]/;
+
 /**
  * Splits Typst markup into blocks with source offsets.
+ * Disabled features are left as ordinary paragraph text.
  */
-export function parseTypst(source: string): Block[] {
+export function parseTypst(
+  source: string,
+  features: TypstFeatures = DEFAULT_TYPST_FEATURES,
+): Block[] {
   if (source.length === 0) {
     return [];
   }
@@ -128,23 +177,25 @@ export function parseTypst(source: string): Block[] {
   const blocks: Block[] = [];
   let lineStart = 0;
   while (lineStart <= source.length) {
-    const fence = parseFence(source, lineStart);
-    if (fence) {
-      blocks.push({
-        kind: "codeblock",
-        from: fence.from,
-        to: fence.to,
-        open: fence.open,
-        close: fence.close,
-        language: fence.language,
-      });
-      lineStart = fence.next;
-      continue;
+    if (features.codeblock) {
+      const fence = parseFence(source, lineStart);
+      if (fence) {
+        blocks.push({
+          kind: "codeblock",
+          from: fence.from,
+          to: fence.to,
+          open: fence.open,
+          close: fence.close,
+          language: fence.language,
+        });
+        lineStart = fence.next;
+        continue;
+      }
     }
 
     const newlineAt = source.indexOf("\n", lineStart);
     const lineEnd = newlineAt === -1 ? source.length : newlineAt;
-    const block = parseLine(source, lineStart, lineEnd);
+    const block = parseLine(source, lineStart, lineEnd, features);
     if (block) {
       blocks.push(block);
       lineStart = nextLineStart(source, block.to, newlineAt);
@@ -164,8 +215,12 @@ export function parseTypst(source: string): Block[] {
 export function typstLinkAt(
   source: string,
   offset: number,
+  features: TypstFeatures = DEFAULT_TYPST_FEATURES,
 ): LinkSpan | undefined {
-  for (const block of parseTypst(source)) {
+  if (!features.link) {
+    return undefined;
+  }
+  for (const block of parseTypst(source, features)) {
     if (block.kind === "codeblock") {
       continue;
     }
@@ -217,19 +272,24 @@ function parseLine(
   source: string,
   from: number,
   to: number,
+  features: TypstFeatures,
 ): Block | undefined {
   if (from === to) {
     return undefined;
   }
-  const heading = parseHeadingLine(source, from, to);
-  if (heading) {
-    return heading;
+  if (features.heading) {
+    const heading = parseHeadingLine(source, from, to, features);
+    if (heading) {
+      return heading;
+    }
   }
-  const list = parseListLine(source, from, to);
-  if (list) {
-    return list;
+  if (features.list) {
+    const list = parseListLine(source, from, to, features);
+    if (list) {
+      return list;
+    }
   }
-  const children = parseInline(source, from, to);
+  const children = parseInline(source, from, to, features);
   const end = spanEnd(children, to);
   return {
     kind: "paragraph",
@@ -243,6 +303,7 @@ function parseHeadingLine(
   source: string,
   from: number,
   to: number,
+  features: TypstFeatures,
 ): HeadingBlock | undefined {
   const line = source.slice(from, to);
   const match = HEADING.exec(line);
@@ -253,7 +314,7 @@ function parseHeadingLine(
   const level = marks.length as HeadingLevel;
   const atxTo = from + marks.length;
   const contentFrom = atxTo + 1;
-  const children = parseInline(source, contentFrom, to);
+  const children = parseInline(source, contentFrom, to, features);
   return {
     kind: "heading",
     level,
@@ -269,6 +330,7 @@ function parseListLine(
   source: string,
   from: number,
   to: number,
+  features: TypstFeatures,
 ): ListBlock | undefined {
   const line = source.slice(from, to);
   let listKind: ListBlock["listKind"] | undefined;
@@ -283,7 +345,7 @@ function parseListLine(
     return undefined;
   }
   const markTo = from + 2;
-  const children = parseInline(source, markTo, to);
+  const children = parseInline(source, markTo, to, features);
   return {
     kind: "list",
     listKind,
@@ -304,7 +366,12 @@ function spanEnd(children: InlineSpan[], fallback: number): number {
   return end;
 }
 
-function parseInline(source: string, from: number, to: number): InlineSpan[] {
+function parseInline(
+  source: string,
+  from: number,
+  to: number,
+  features: TypstFeatures,
+): InlineSpan[] {
   if (from >= to) {
     return [];
   }
@@ -318,7 +385,7 @@ function parseInline(source: string, from: number, to: number): InlineSpan[] {
       cursor += escaped;
       continue;
     }
-    const wrapped = matchInline(source, cursor);
+    const wrapped = matchInline(source, cursor, features);
     if (!wrapped || wrapped.from !== cursor) {
       cursor += 1;
       continue;
@@ -342,40 +409,138 @@ function parseInline(source: string, from: number, to: number): InlineSpan[] {
   return children;
 }
 
-function matchInline(source: string, from: number): InlineSpan | undefined {
-  const comment = matchComment(source, from);
-  if (comment) {
-    return comment;
+function matchInline(
+  source: string,
+  from: number,
+  features: TypstFeatures,
+): InlineSpan | undefined {
+  if (features.comment) {
+    const comment = matchComment(source, from);
+    if (comment) {
+      return comment;
+    }
   }
-  const raw = matchRaw(source, from);
-  if (raw) {
-    return raw;
+  if (features.inlineCode) {
+    const raw = matchRaw(source, from);
+    if (raw) {
+      return raw;
+    }
   }
-  const math = matchMath(source, from);
-  if (math) {
-    return math;
+  if (features.math) {
+    const math = matchMath(source, from);
+    if (math) {
+      return math;
+    }
   }
-  const hash = matchHash(source, from);
-  if (hash) {
-    return hash;
+  if (features.hash) {
+    const hash = matchHash(source, from, features);
+    if (hash) {
+      return hash;
+    }
   }
-  const link = matchLink(source, from);
-  if (link) {
-    return link;
+  if (features.linebreak) {
+    const linebreak = matchLinebreak(source, from);
+    if (linebreak) {
+      return linebreak;
+    }
   }
-  const label = matchLabel(source, from);
-  if (label) {
-    return label;
+  if (features.link) {
+    const link = matchLink(source, from);
+    if (link) {
+      return link;
+    }
   }
-  const ref = matchRef(source, from);
-  if (ref) {
-    return ref;
+  if (features.label) {
+    const label = matchLabel(source, from);
+    if (label) {
+      return label;
+    }
   }
-  const strong = matchMarked(source, from, "*", "strong");
-  if (strong) {
-    return strong;
+  if (features.ref) {
+    const ref = matchRef(source, from);
+    if (ref) {
+      return ref;
+    }
   }
-  return matchMarked(source, from, "_", "em");
+  if (features.symbols) {
+    const symbol = matchSymbol(source, from);
+    if (symbol) {
+      return symbol;
+    }
+  }
+  if (features.strong) {
+    const strong = matchMarked(source, from, "*", "strong", features);
+    if (strong) {
+      return strong;
+    }
+  }
+  if (features.em) {
+    const em = matchMarked(source, from, "_", "em", features);
+    if (em) {
+      return em;
+    }
+  }
+  if (features.smartquote) {
+    return matchSmartQuote(source, from);
+  }
+  return undefined;
+}
+
+function matchLinebreak(source: string, from: number): LinebreakSpan | undefined {
+  if (source[from] !== "\\") {
+    return undefined;
+  }
+  if (escapeLength(source, from) > 0) {
+    return undefined;
+  }
+  const next = source[from + 1];
+  if (next === " ") {
+    return { kind: "linebreak", from, to: from + 2 };
+  }
+  return { kind: "linebreak", from, to: from + 1 };
+}
+
+function matchSymbol(source: string, from: number): SymbolSpan | undefined {
+  if (source.startsWith("---", from)) {
+    return { kind: "symbol", from, to: from + 3, glyph: "\u2014" };
+  }
+  if (source.startsWith("--", from)) {
+    return { kind: "symbol", from, to: from + 2, glyph: "\u2013" };
+  }
+  if (source.startsWith("...", from)) {
+    return { kind: "symbol", from, to: from + 3, glyph: "\u2026" };
+  }
+  if (source.startsWith("-?", from)) {
+    return { kind: "symbol", from, to: from + 2, glyph: "\u00AD" };
+  }
+  if (source[from] === "~") {
+    return { kind: "symbol", from, to: from + 1, glyph: "\u00A0" };
+  }
+  return undefined;
+}
+
+function matchSmartQuote(source: string, from: number): SmartQuoteSpan | undefined {
+  const char = source[from];
+  if (char !== "'" && char !== '"') {
+    return undefined;
+  }
+  const opening = from === 0 || isQuoteOpening(source[from - 1]);
+  const glyph =
+    char === '"'
+      ? opening
+        ? "\u201C"
+        : "\u201D"
+      : opening
+        ? "\u2018"
+        : "\u2019";
+  return { kind: "smartquote", from, to: from + 1, glyph };
+}
+
+function isQuoteOpening(previous: string | undefined): boolean {
+  if (previous === undefined) {
+    return true;
+  }
+  return /\s/.test(previous) || /[(\[{]/.test(previous);
 }
 
 function matchComment(source: string, from: number): CommentSpan | undefined {
@@ -449,7 +614,11 @@ function matchMath(source: string, from: number): MarkedSpan | undefined {
   return undefined;
 }
 
-function matchHash(source: string, from: number): HashSpan | undefined {
+function matchHash(
+  source: string,
+  from: number,
+  features: TypstFeatures,
+): HashSpan | undefined {
   if (source[from] !== "#") {
     return undefined;
   }
@@ -459,7 +628,7 @@ function matchHash(source: string, from: number): HashSpan | undefined {
   }
   const opener = source[after];
   if (opener === "(" || opener === "[" || opener === "{") {
-    return hashWithOpener(source, from, after, opener);
+    return hashWithOpener(source, from, after, opener, features);
   }
   const ident = readIdent(source, after);
   if (!ident) {
@@ -474,26 +643,34 @@ function matchHash(source: string, from: number): HashSpan | undefined {
     cursor = field.to;
   }
   if (STATEMENT_KEYWORDS.has(ident.name)) {
-    return hashStatement(source, from, cursor);
+    return hashStatement(source, from, cursor, features);
   }
+  let paren: { from: number; to: number } | undefined;
   if (source[cursor] === "(") {
+    const open = cursor;
     cursor = consumeCodeBalanced(source, cursor) ?? source.length;
+    paren = { from: open, to: cursor };
   }
   if (source[cursor] === "[") {
-    return hashWithContent(source, from, cursor);
+    return hashWithContent(source, from, cursor, features);
   }
   if (source[cursor] === "{") {
     cursor = consumeCodeBalanced(source, cursor) ?? source.length;
   }
-  return {
-    kind: "hash",
-    from,
-    to: cursor,
-    code: { from, to: cursor },
-    contentOpen: undefined,
-    contentClose: undefined,
-    children: [],
-  };
+  return finishHash(
+    source,
+    {
+      kind: "hash",
+      from,
+      to: cursor,
+      code: { from, to: cursor },
+      contentOpen: undefined,
+      contentClose: undefined,
+      children: [],
+    },
+    features,
+    paren,
+  );
 }
 
 function hashWithOpener(
@@ -501,12 +678,13 @@ function hashWithOpener(
   from: number,
   openerAt: number,
   opener: string,
+  features: TypstFeatures,
 ): HashSpan {
   if (opener === "[") {
-    return hashWithContent(source, from, openerAt);
+    return hashWithContent(source, from, openerAt, features);
   }
   const end = consumeCodeBalanced(source, openerAt) ?? source.length;
-  return {
+  return finishHash(source, {
     kind: "hash",
     from,
     to: end,
@@ -514,18 +692,19 @@ function hashWithOpener(
     contentOpen: undefined,
     contentClose: undefined,
     children: [],
-  };
+  });
 }
 
 function hashWithContent(
   source: string,
   from: number,
   openAt: number,
+  features: TypstFeatures,
 ): HashSpan {
   const closeAt = findContentClose(source, openAt + 1);
   const innerTo = closeAt === undefined ? source.length : closeAt;
   const closed = closeAt !== undefined;
-  return {
+  return finishHash(source, {
     kind: "hash",
     from,
     to: closed ? closeAt + 1 : source.length,
@@ -534,11 +713,16 @@ function hashWithContent(
     contentClose: closed
       ? { from: closeAt, to: closeAt + 1 }
       : undefined,
-    children: parseInline(source, openAt + 1, innerTo),
-  };
+    children: parseInline(source, openAt + 1, innerTo, features),
+  });
 }
 
-function hashStatement(source: string, from: number, afterIdent: number): HashSpan {
+function hashStatement(
+  source: string,
+  from: number,
+  afterIdent: number,
+  features: TypstFeatures,
+): HashSpan {
   let cursor = afterIdent;
   let contentOpen: MarkRange | undefined;
   let contentClose: MarkRange | undefined;
@@ -557,7 +741,7 @@ function hashStatement(source: string, from: number, afterIdent: number): HashSp
       continue;
     }
     if (source[cursor] === "[") {
-      const hash = hashWithContent(source, from, cursor);
+      const hash = hashWithContent(source, from, cursor, features);
       contentOpen = hash.contentOpen;
       contentClose = hash.contentClose;
       children = hash.children;
@@ -566,7 +750,7 @@ function hashStatement(source: string, from: number, afterIdent: number): HashSp
     }
     cursor += 1;
   }
-  return {
+  return finishHash(source, {
     kind: "hash",
     from,
     to: cursor,
@@ -577,7 +761,311 @@ function hashStatement(source: string, from: number, afterIdent: number): HashSp
     contentOpen,
     contentClose,
     children,
+  });
+}
+
+function finishHash(
+  source: string,
+  span: Omit<HashSpan, "name" | "imageSrc" | "textStyle" | "table">,
+  features?: TypstFeatures,
+  paren?: { from: number; to: number },
+): HashSpan {
+  const name = hashIdentName(source, span.from);
+  const table =
+    paren !== undefined && features !== undefined && isTableName(name)
+      ? parseTypstTable(source, paren.from + 1, paren.to - 1, features)
+      : undefined;
+  return {
+    ...span,
+    name,
+    imageSrc:
+      name === "image"
+        ? firstStringLiteral(source, span.from, span.code.to)
+        : undefined,
+    textStyle:
+      name === "text"
+        ? textStyleFromCode(source, span.code.from, span.code.to)
+        : undefined,
+    table,
   };
+}
+
+function isTableName(name: string): boolean {
+  return name === "table" || name.endsWith("-table");
+}
+
+function parseTypstTable(
+  source: string,
+  from: number,
+  to: number,
+  features: TypstFeatures,
+): TypstTableGrid | undefined {
+  let columns: number | undefined;
+  let header: TypstTableCell[] | undefined;
+  const cells: TypstTableCell[] = [];
+  let cursor = from;
+  while (cursor < to) {
+    const skipped = skipCodeAtom(source, cursor);
+    if (skipped > cursor) {
+      cursor = skipped;
+      continue;
+    }
+    const namedColumns = readColumnsArg(source, cursor, to);
+    if (namedColumns) {
+      columns = namedColumns.count;
+      cursor = namedColumns.to;
+      continue;
+    }
+    const headerCall = readTableHeader(source, cursor, to, features);
+    if (headerCall) {
+      header = headerCall.cells;
+      cursor = headerCall.to;
+      continue;
+    }
+    const named = skipNamedArg(source, cursor, to);
+    if (named !== undefined) {
+      cursor = named;
+      continue;
+    }
+    if (source[cursor] === "[") {
+      const cell = readContentCell(source, cursor, features);
+      cells.push(cell);
+      cursor = cell.to;
+      continue;
+    }
+    if (source[cursor] === "(" || source[cursor] === "{") {
+      cursor = consumeCodeBalanced(source, cursor) ?? to;
+      continue;
+    }
+    cursor += 1;
+  }
+  const colCount = columns ?? header?.length;
+  if (colCount === undefined || colCount < 1) {
+    return undefined;
+  }
+  const headerRow = header ?? cells.splice(0, colCount);
+  if (headerRow.length === 0) {
+    return undefined;
+  }
+  const rows: TypstTableCell[][] = [];
+  for (let index = 0; index < cells.length; index += colCount) {
+    rows.push(cells.slice(index, index + colCount));
+  }
+  return { header: headerRow, rows };
+}
+
+function readColumnsArg(
+  source: string,
+  from: number,
+  to: number,
+): { count: number; to: number } | undefined {
+  const ident = readIdent(source, from);
+  if (ident?.name !== "columns") {
+    return undefined;
+  }
+  let cursor = skipSpaces(source, ident.to, to);
+  if (source[cursor] !== ":") {
+    return undefined;
+  }
+  cursor = skipSpaces(source, cursor + 1, to);
+  if (source[cursor] === "(") {
+    const end = consumeCodeBalanced(source, cursor) ?? to;
+    return {
+      count: Math.max(1, countCommaItems(source, cursor + 1, end - 1)),
+      to: end,
+    };
+  }
+  const digits = /^\d+/.exec(source.slice(cursor, to));
+  if (!digits) {
+    return undefined;
+  }
+  return { count: Number(digits[0]), to: cursor + digits[0].length };
+}
+
+function readTableHeader(
+  source: string,
+  from: number,
+  to: number,
+  features: TypstFeatures,
+): { cells: TypstTableCell[]; to: number } | undefined {
+  const ident = readIdent(source, from);
+  if (ident?.name !== "table") {
+    return undefined;
+  }
+  let cursor = skipSpaces(source, ident.to, to);
+  if (source[cursor] !== ".") {
+    return undefined;
+  }
+  cursor = skipSpaces(source, cursor + 1, to);
+  const field = readIdent(source, cursor);
+  if (field?.name !== "header") {
+    return undefined;
+  }
+  cursor = skipSpaces(source, field.to, to);
+  if (source[cursor] !== "(") {
+    return undefined;
+  }
+  const end = consumeCodeBalanced(source, cursor) ?? to;
+  return {
+    cells: collectContentCells(source, cursor + 1, end - 1, features),
+    to: end,
+  };
+}
+
+function skipNamedArg(
+  source: string,
+  from: number,
+  to: number,
+): number | undefined {
+  const ident = readIdent(source, from);
+  if (!ident) {
+    return undefined;
+  }
+  let cursor = skipSpaces(source, ident.to, to);
+  if (source[cursor] !== ":") {
+    return undefined;
+  }
+  cursor = skipSpaces(source, cursor + 1, to);
+  if (source[cursor] === "[") {
+    return readContentCell(source, cursor, DEFAULT_TYPST_FEATURES).to;
+  }
+  if (source[cursor] === "(" || source[cursor] === "{") {
+    return consumeCodeBalanced(source, cursor) ?? to;
+  }
+  const skipped = skipCodeAtom(source, cursor);
+  if (skipped > cursor) {
+    return skipped;
+  }
+  while (cursor < to && /[\w.\-]/.test(source[cursor] ?? "")) {
+    cursor += 1;
+  }
+  return cursor === ident.to ? undefined : cursor;
+}
+
+function collectContentCells(
+  source: string,
+  from: number,
+  to: number,
+  features: TypstFeatures,
+): TypstTableCell[] {
+  const cells: TypstTableCell[] = [];
+  let cursor = from;
+  while (cursor < to) {
+    const skipped = skipCodeAtom(source, cursor);
+    if (skipped > cursor) {
+      cursor = skipped;
+      continue;
+    }
+    if (source[cursor] === "[") {
+      const cell = readContentCell(source, cursor, features);
+      cells.push(cell);
+      cursor = cell.to;
+      continue;
+    }
+    if (source[cursor] === "(" || source[cursor] === "{") {
+      cursor = consumeCodeBalanced(source, cursor) ?? to;
+      continue;
+    }
+    cursor += 1;
+  }
+  return cells;
+}
+
+function readContentCell(
+  source: string,
+  openAt: number,
+  features: TypstFeatures,
+): TypstTableCell {
+  const closeAt = findContentClose(source, openAt + 1);
+  const innerTo = closeAt === undefined ? source.length : closeAt;
+  return {
+    from: openAt,
+    to: closeAt === undefined ? source.length : closeAt + 1,
+    children: parseInline(source, openAt + 1, innerTo, features),
+  };
+}
+
+function countCommaItems(source: string, from: number, to: number): number {
+  let count = 0;
+  let depth = 0;
+  let seen = false;
+  let cursor = from;
+  while (cursor < to) {
+    const skipped = skipCodeAtom(source, cursor);
+    if (skipped > cursor) {
+      seen = true;
+      cursor = skipped;
+      continue;
+    }
+    const char = source[cursor];
+    if (char === "(" || char === "[" || char === "{") {
+      depth += 1;
+      seen = true;
+    } else if (char === ")" || char === "]" || char === "}") {
+      depth = Math.max(0, depth - 1);
+    } else if (char === "," && depth === 0) {
+      if (seen) {
+        count += 1;
+      }
+      seen = false;
+    } else if (char !== undefined && !/\s/.test(char)) {
+      seen = true;
+    }
+    cursor += 1;
+  }
+  if (seen) {
+    count += 1;
+  }
+  return count;
+}
+
+function skipSpaces(source: string, from: number, to: number): number {
+  let cursor = from;
+  while (cursor < to && /\s/.test(source[cursor] ?? "")) {
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function hashIdentName(source: string, from: number): string {
+  if (source[from] !== "#") {
+    return "";
+  }
+  return readIdent(source, from + 1)?.name ?? "";
+}
+
+function firstStringLiteral(
+  source: string,
+  from: number,
+  to: number,
+): string | undefined {
+  let cursor = from;
+  while (cursor < to) {
+    if (source[cursor] === "\"") {
+      const end = skipString(source, cursor);
+      if (end > cursor + 1) {
+        return source.slice(cursor + 1, end - 1);
+      }
+      return undefined;
+    }
+    cursor += 1;
+  }
+  return undefined;
+}
+
+function textStyleFromCode(
+  source: string,
+  from: number,
+  to: number,
+): "strong" | "em" | undefined {
+  const code = source.slice(from, to);
+  if (/weight:\s*(?:"bold"|'bold'|"black"|'black'|[7-9]00)/.test(code)) {
+    return "strong";
+  }
+  if (/style:\s*(?:"italic"|'italic')/.test(code)) {
+    return "em";
+  }
+  return undefined;
 }
 
 function matchLink(source: string, from: number): LinkSpan | undefined {
@@ -639,6 +1127,7 @@ function matchMarked(
   from: number,
   mark: string,
   kind: "strong" | "em",
+  features: TypstFeatures,
 ): MarkedSpan | undefined {
   if (source[from] !== mark) {
     return undefined;
@@ -657,7 +1146,7 @@ function matchMarked(
     to: close + 1,
     markOpen: { from, to: afterOpen },
     markClose: { from: close, to: close + 1 },
-    children: parseInline(source, afterOpen, close),
+    children: parseInline(source, afterOpen, close, features),
   };
 }
 
@@ -707,7 +1196,7 @@ function findContentClose(source: string, from: number): number | undefined {
       cursor = math.to;
       continue;
     }
-    const hash = matchHash(source, cursor);
+    const hash = matchHash(source, cursor, DEFAULT_TYPST_FEATURES);
     if (hash) {
       cursor = hash.to;
       continue;
@@ -835,10 +1324,11 @@ function escapeLength(source: string, from: number): number {
       return close + 1 - from;
     }
   }
-  if (from + 1 >= source.length) {
-    return 1;
+  const next = source[from + 1];
+  if (next !== undefined && MARKUP_ESCAPE.test(next)) {
+    return 2;
   }
-  return 2;
+  return 0;
 }
 
 function lineEndAt(source: string, from: number): number {

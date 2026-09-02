@@ -5,13 +5,14 @@ export type DocumentSession = {
   lastSaved: string;
   recents: string[];
   projectRoot: string | null;
+  typstMain: string | null;
 };
 
 /**
  * Starts an untitled session, optionally restoring recent files.
  */
 export function createDocumentSession(recents: string[] = []): DocumentSession {
-  return { path: null, lastSaved: "", recents, projectRoot: null };
+  return { path: null, lastSaved: "", recents, projectRoot: null, typstMain: null };
 }
 
 /**
@@ -30,6 +31,7 @@ export function applyNew(session: DocumentSession): DocumentSession {
     lastSaved: "",
     recents: session.recents,
     projectRoot: session.projectRoot,
+    typstMain: session.typstMain,
   };
 }
 
@@ -46,6 +48,7 @@ export function applyOpen(
     lastSaved: content,
     recents: rememberRecent(session.recents, path),
     projectRoot: session.projectRoot,
+    typstMain: session.typstMain,
   };
 }
 
@@ -77,7 +80,21 @@ export function applyOpenFolder(
   session: DocumentSession,
   projectRoot: string,
 ): DocumentSession {
-  return { ...session, projectRoot };
+  return { ...session, projectRoot, typstMain: null };
+}
+
+/**
+ * Enters a Typst project whose file set is the main document's `#include` graph.
+ */
+export function applyOpenTypstDocument(
+  session: DocumentSession,
+  mainPath: string,
+): DocumentSession {
+  return {
+    ...session,
+    projectRoot: parentDir(mainPath),
+    typstMain: mainPath,
+  };
 }
 
 /**
@@ -90,5 +107,15 @@ export function applyRename(
   const recents = session.path
     ? rememberRecent(forgetRecent(session.recents, session.path), path)
     : rememberRecent(session.recents, path);
-  return { ...session, path, recents };
+  const typstMain = session.typstMain === session.path ? path : session.typstMain;
+  return { ...session, path, recents, typstMain };
+}
+
+function parentDir(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const slash = trimmed.lastIndexOf("/");
+  if (slash <= 0) {
+    return slash === 0 ? "/" : "";
+  }
+  return trimmed.slice(0, slash);
 }

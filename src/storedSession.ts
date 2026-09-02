@@ -2,6 +2,7 @@ export type StoredSession = {
   root: string | null;
   lastFile: string | null;
   carets: Record<string, number>;
+  typstMain: string | null;
 };
 
 /**
@@ -30,7 +31,7 @@ export function parseStoredSession(raw: string | null): StoredSession | null {
     if (typeof legacy === "number" && lastFile !== null && carets[lastFile] === undefined) {
       carets[lastFile] = legacy;
     }
-    return { root, lastFile, carets };
+    return { root, lastFile, carets, typstMain: asString(record.typstMain) };
   } catch {
     return null;
   }

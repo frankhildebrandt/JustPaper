@@ -41,7 +41,9 @@ export type DecorationKind =
   | "hash"
   | "label"
   | "ref"
-  | "line-list";
+  | "line-list"
+  | "linebreak-widget"
+  | "glyph-widget";
 
 export type DecorationSpec = {
   kind: DecorationKind;
@@ -63,6 +65,7 @@ export type DecorationSpec = {
   /** Position of a quote/callout line within its block (for continuous drawer CSS). */
   quotePart?: "only" | "first" | "mid" | "last";
   opensSource?: boolean;
+  glyph?: string;
 };
 
 export type DecorationOptions = {

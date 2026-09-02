@@ -38,8 +38,9 @@ export function renamePath(
 export function untitledCreatePath(
   projectRoot: string,
   nextDisplayName: string,
+  templatePath = "note.md",
 ): string | undefined {
-  const next = nextFileName("note.md", nextDisplayName.trim());
+  const next = nextFileName(templatePath, nextDisplayName.trim());
   if (next === undefined) {
     return undefined;
   }

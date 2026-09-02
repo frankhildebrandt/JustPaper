@@ -13,6 +13,7 @@ import {
   applyNew,
   applyOpen,
   applyOpenFolder,
+  applyOpenTypstDocument,
   applyRename,
   applySave,
   createDocumentSession,
@@ -44,6 +45,12 @@ import {
   renameCaret,
   serializeStoredSession,
 } from "./storedSession";
+import { searchLines } from "./searchLines";
+import {
+  appendTypstInclude,
+  collectTypstProjectFiles,
+  resolveTypstInclude,
+} from "./typst/includes";
 import {
   resolveWikiLink,
   wikiCreatePath,
@@ -59,7 +66,9 @@ const FILE_FILTERS = [
   { name: "Typst", extensions: ["typ"] },
   { name: "Text", extensions: ["txt"] },
 ];
+const TYPST_FILTERS = [{ name: "Typst", extensions: ["typ"] }];
 const DOCUMENT_START_LINE = 1;
+const SEARCH_LIMIT = 200;
 
 export type { SearchHit, ProjectNote };
 
@@ -78,17 +87,20 @@ export type DocumentBinding = {
   newDocument: () => Promise<void>;
   open: () => Promise<void>;
   openFolder: () => Promise<void>;
+  openTypstDocument: () => Promise<void>;
   save: () => Promise<boolean>;
   saveAs: () => Promise<boolean>;
   rename: (nextDisplayName: string) => Promise<boolean>;
   openRecent: (path: string) => Promise<void>;
   openProjectFile: (relativePath: string, caretLine?: number) => Promise<void>;
   followWiki: (target: string) => Promise<void>;
+  followTypstInclude: (includePath: string) => Promise<void>;
   listFiles: () => Promise<string[]>;
   readNotes: () => Promise<ProjectNote[]>;
   search: (query: string) => Promise<SearchHit[]>;
   path: () => string | null;
   projectRoot: () => string | null;
+  typstMain: () => string | null;
   recents: () => string[];
   onRecentsChange: (listener: () => void) => () => void;
   onSessionChange: (listener: () => void) => () => void;
@@ -135,6 +147,14 @@ function joinRoot(root: string, relative: string): string {
   return `${root.replace(/\/+$/, "")}/${relative.replace(/^\/+/, "")}`;
 }
 
+function relativeFromRoot(root: string, path: string): string | undefined {
+  const prefix = `${root.replace(/\/+$/, "")}/`;
+  if (!path.startsWith(prefix)) {
+    return undefined;
+  }
+  return path.slice(prefix.length);
+}
+
 function parentDir(path: string): string | undefined {
   const trimmed = path.replace(/\/+$/, "");
   const slash = trimmed.lastIndexOf("/");
@@ -155,7 +175,9 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   let applying = false;
   const stored = loadStoredSession();
   let carets = stored?.carets ?? {};
-  if (stored?.root) {
+  if (stored?.typstMain) {
+    session = applyOpenTypstDocument(session, stored.typstMain);
+  } else if (stored?.root) {
     session = applyOpenFolder(session, stored.root);
   }
 
@@ -179,6 +201,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
         root: session.projectRoot,
         lastFile: session.path,
         carets,
+        typstMain: session.typstMain,
       }),
     );
   };
@@ -193,7 +216,8 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     if (
       previous.path !== session.path ||
-      previous.projectRoot !== session.projectRoot
+      previous.projectRoot !== session.projectRoot ||
+      previous.typstMain !== session.typstMain
     ) {
       for (const listener of sessionListeners) {
         listener();
@@ -382,6 +406,28 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     content.focus();
   };
 
+  const openTypstDocument = async (): Promise<void> => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters: TYPST_FILTERS,
+    });
+    if (typeof path !== "string") {
+      return;
+    }
+    autosave.flush();
+    if (!(await confirmProceed())) {
+      return;
+    }
+    const previous = session;
+    session = applyOpenTypstDocument(session, path);
+    notify(previous);
+    await adoptFile(path, DOCUMENT_START_LINE);
+  };
+
   const renameDocument = async (nextDisplayName: string): Promise<boolean> => {
     const typed = nextDisplayName.trim();
     if (typed === displayName(session.path)) {
@@ -392,7 +438,11 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     if (session.path === null) {
       if (session.projectRoot !== null) {
-        const dest = untitledCreatePath(session.projectRoot, typed);
+        const dest = untitledCreatePath(
+          session.projectRoot,
+          typed,
+          session.typstMain === null ? "note.md" : "note.typ",
+        );
         if (dest === undefined) {
           return false;
         }
@@ -400,7 +450,11 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
           await showError(`“${fileName(dest)}” already exists.`);
           return false;
         }
-        return writeTo(dest);
+        const saved = await writeTo(dest);
+        if (saved) {
+          await addIncludeToMain(dest);
+        }
+        return saved;
       }
       const dest = untitledCreatePath("/untitled", typed);
       if (dest === undefined) {
@@ -444,15 +498,99 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.projectRoot === null) {
       return;
     }
-    await switchTo(
-      joinRoot(session.projectRoot, relativePath),
-      caretLine ?? DOCUMENT_START_LINE,
-    );
+    const dest = joinRoot(session.projectRoot, relativePath);
+    if (session.typstMain !== null && !(await exists(dest))) {
+      if (!(await ensureEmptyFile(dest))) {
+        return;
+      }
+    }
+    await switchTo(dest, caretLine ?? DOCUMENT_START_LINE);
+  };
+
+  const readRelativeNote = async (
+    relative: string,
+  ): Promise<string | undefined> => {
+    if (session.projectRoot === null) {
+      return undefined;
+    }
+    const abs = joinRoot(session.projectRoot, relative);
+    if (session.path === abs) {
+      return content.getText();
+    }
+    try {
+      return await readTextFile(abs);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const listTypstGraph = async (): Promise<string[]> => {
+    if (session.projectRoot === null || session.typstMain === null) {
+      return [];
+    }
+    const mainRelative = relativeFromRoot(session.projectRoot, session.typstMain);
+    if (mainRelative === undefined) {
+      return [];
+    }
+    return collectTypstProjectFiles(mainRelative, readRelativeNote);
+  };
+
+  const ensureEmptyFile = async (dest: string): Promise<boolean> => {
+    if (await exists(dest)) {
+      return true;
+    }
+    const parent = parentDir(dest);
+    if (parent) {
+      try {
+        await mkdir(parent, { recursive: true });
+      } catch {
+        await showError(`“${fileName(dest)}” could not be created.`);
+        return false;
+      }
+    }
+    try {
+      await writeTextFile(dest, "");
+    } catch {
+      await showError(`“${fileName(dest)}” could not be created.`);
+      return false;
+    }
+    return true;
+  };
+
+  const addIncludeToMain = async (absoluteNewFile: string): Promise<void> => {
+    const root = session.projectRoot;
+    const main = session.typstMain;
+    if (root === null || main === null || absoluteNewFile === main) {
+      return;
+    }
+    const newRelative = relativeFromRoot(root, absoluteNewFile);
+    const mainRelative = relativeFromRoot(root, main);
+    if (newRelative === undefined || mainRelative === undefined) {
+      return;
+    }
+    let text: string;
+    try {
+      text = await readTextFile(main);
+    } catch {
+      return;
+    }
+    const next = appendTypstInclude(text, mainRelative, newRelative);
+    if (next === text) {
+      return;
+    }
+    try {
+      await writeTextFile(main, next);
+    } catch {
+      await showError(`“${fileName(main)}” could not be saved.`);
+    }
   };
 
   const listFiles = async (): Promise<string[]> => {
     if (session.projectRoot === null) {
       return [];
+    }
+    if (session.typstMain !== null) {
+      return listTypstGraph();
     }
     return listProjectFiles(session.projectRoot);
   };
@@ -461,6 +599,17 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.projectRoot === null) {
       return [];
     }
+    if (session.typstMain !== null) {
+      const files = await listTypstGraph();
+      const notes: ProjectNote[] = [];
+      for (const relative of files) {
+        const note = await readRelativeNote(relative);
+        if (note !== undefined) {
+          notes.push({ path: relative, content: note });
+        }
+      }
+      return notes;
+    }
     return readProjectNotes(session.projectRoot);
   };
 
@@ -468,7 +617,47 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.projectRoot === null) {
       return [];
     }
+    if (session.typstMain !== null) {
+      const files = await listTypstGraph();
+      const hits: SearchHit[] = [];
+      for (const relative of files) {
+        if (hits.length >= SEARCH_LIMIT) {
+          break;
+        }
+        const note = await readRelativeNote(relative);
+        if (note === undefined) {
+          continue;
+        }
+        for (const hit of searchLines(note, query)) {
+          if (hits.length >= SEARCH_LIMIT) {
+            break;
+          }
+          hits.push({ path: relative, line: hit.line, text: hit.text });
+        }
+      }
+      return hits;
+    }
     return searchProject(session.projectRoot, query);
+  };
+
+  const followTypstInclude = async (includePath: string): Promise<void> => {
+    if (session.projectRoot === null || session.path === null) {
+      return;
+    }
+    const fromRelative = relativeFromRoot(session.projectRoot, session.path);
+    if (fromRelative === undefined) {
+      return;
+    }
+    const resolved = resolveTypstInclude(fromRelative, includePath);
+    if (resolved === undefined) {
+      return;
+    }
+    const dest = joinRoot(session.projectRoot, resolved);
+    autosave.flush();
+    if (!(await ensureEmptyFile(dest))) {
+      return;
+    }
+    await switchTo(dest);
   };
 
   const followWiki = async (target: string): Promise<void> => {
@@ -549,17 +738,20 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     newDocument,
     open: openDocument,
     openFolder,
+    openTypstDocument,
     save: saveDocument,
     saveAs: () => saveAsDocument(),
     rename: renameDocument,
     openRecent,
     openProjectFile,
     followWiki,
+    followTypstInclude,
     listFiles,
     readNotes,
     search,
     path: () => session.path,
     projectRoot: () => session.projectRoot,
+    typstMain: () => session.typstMain,
     recents: () => session.recents,
     onRecentsChange: (listener: () => void): (() => void) => {
       recentsListeners.add(listener);

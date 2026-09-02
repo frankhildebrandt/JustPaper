@@ -7,6 +7,13 @@ import {
   withMarkdownFeature,
 } from "./markdown/features";
 import type { ParserMode } from "./parserMode";
+import {
+  DEFAULT_TYPST_FEATURES,
+  TYPST_FEATURES,
+  type TypstFeature,
+  type TypstFeatures,
+  withTypstFeature,
+} from "./typst/features";
 import type { ViewMode } from "./viewMode";
 
 export type FontSize = "xs" | "s" | "m" | "l" | "xl";
@@ -22,6 +29,7 @@ export type AppSettings = {
   highlightMode: HighlightMode;
   markdownFeatures: MarkdownFeatures;
   markdownGraphic: boolean;
+  typstFeatures: TypstFeatures;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -33,6 +41,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   highlightMode: "none",
   markdownFeatures: { ...DEFAULT_MARKDOWN_FEATURES },
   markdownGraphic: false,
+  typstFeatures: { ...DEFAULT_TYPST_FEATURES },
 };
 
 export const SETTINGS_STORAGE_KEY = "justpaper.settings";
@@ -89,6 +98,7 @@ export function parseSettings(raw: string | null): AppSettings {
       highlightMode: asHighlightMode(record.highlightMode),
       markdownFeatures: asMarkdownFeatures(record.markdownFeatures),
       markdownGraphic: asBoolean(record.markdownGraphic, DEFAULT_SETTINGS.markdownGraphic),
+      typstFeatures: asTypstFeatures(record.typstFeatures),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -251,6 +261,20 @@ function asMarkdownFeatures(value: unknown): MarkdownFeatures {
   return features;
 }
 
+function asTypstFeatures(value: unknown): TypstFeatures {
+  if (value === null || typeof value !== "object") {
+    return { ...DEFAULT_TYPST_FEATURES };
+  }
+  const record = value as Record<string, unknown>;
+  const features = { ...DEFAULT_TYPST_FEATURES };
+  for (const id of TYPST_FEATURES) {
+    if (typeof record[id] === "boolean") {
+      features[id] = record[id];
+    }
+  }
+  return features;
+}
+
 export type SettingsApply = {
   fontSize: (size: FontSize) => void;
   viewMode: (mode: ViewMode) => void;
@@ -258,6 +282,7 @@ export type SettingsApply = {
   highlightMode: (mode: HighlightMode) => void;
   markdownFeatures: (features: MarkdownFeatures) => void;
   markdownGraphic: (enabled: boolean) => void;
+  typstFeatures: (features: TypstFeatures) => void;
 };
 
 export type SettingsBinding = {
@@ -270,6 +295,7 @@ export type SettingsBinding = {
   setHighlightMode: (mode: HighlightMode) => void;
   setMarkdownFeature: (id: MarkdownFeature, enabled: boolean) => void;
   setMarkdownGraphic: (enabled: boolean) => void;
+  setTypstFeature: (id: TypstFeature, enabled: boolean) => void;
 };
 
 /**
@@ -287,6 +313,7 @@ export function bindSettings(
   apply.highlightMode(current.highlightMode);
   apply.markdownFeatures(current.markdownFeatures);
   apply.markdownGraphic(current.markdownGraphic);
+  apply.typstFeatures(current.typstFeatures);
 
   const commit = (next: AppSettings): void => {
     current = next;
@@ -330,6 +357,15 @@ export function bindSettings(
     setMarkdownGraphic: (enabled) => {
       commit({ ...current, markdownGraphic: enabled });
       apply.markdownGraphic(enabled);
+    },
+    setTypstFeature: (id, enabled) => {
+      const typstFeatures = withTypstFeature(
+        current.typstFeatures,
+        id,
+        enabled,
+      );
+      commit({ ...current, typstFeatures });
+      apply.typstFeatures(typstFeatures);
     },
   };
 }

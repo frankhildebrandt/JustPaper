@@ -25,6 +25,10 @@ import { recentFileLabels } from "./recentFiles";
 import { searchLines } from "./searchLines";
 import { bindSettings } from "./settings";
 import { bindViewMode, textareaLayoutHost } from "./viewMode";
+import {
+  incomingTypstIncludes,
+  outgoingTypstIncludes,
+} from "./typst/includes";
 import { incomingWikiLinks, outgoingWikiLinks } from "./wikiLink";
 import {
   applyChromePlatform,
@@ -81,6 +85,9 @@ window.addEventListener("DOMContentLoaded", () => {
     markdownGraphic: (enabled) => {
       parser.setMarkdownGraphic(enabled);
     },
+    typstFeatures: (features) => {
+      parser.setTypstFeatures(features);
+    },
   });
   const paragraphNav = bindParagraphNav(requiredElement("paragraph-nav"), {
     getDocument: parser.getDocument,
@@ -105,6 +112,9 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   parser.setWikiFollow((target) => {
     void paperDoc.followWiki(target);
+  });
+  parser.setIncludeFollow((target) => {
+    void paperDoc.followTypstInclude(target);
   });
   const applyAssetBase = (): void => {
     parser.setAssetBase(documentDir(paperDoc.path()));
@@ -320,6 +330,37 @@ window.addEventListener("DOMContentLoaded", () => {
     if (paperDoc.projectRoot() === null) {
       return;
     }
+    if (paperDoc.typstMain() !== null) {
+      const root = paperDoc.projectRoot();
+      const path = paperDoc.path();
+      const fromRelative =
+        root === null || path === null
+          ? undefined
+          : relativeFromRoot(root, path);
+      if (fromRelative === undefined) {
+        return;
+      }
+      const links = outgoingTypstIncludes(parser.getDocument(), fromRelative).map(
+        (link) => ({
+          id: link.target,
+          title: link.target,
+          detail: link.path,
+        }),
+      );
+      palette.open({
+        placeholder: "Includes im Dokument",
+        load: (query) =>
+          filterByQuery(
+            links,
+            query,
+            (item) => `${item.title} ${item.detail ?? item.id}`,
+          ),
+        onPick: (item) => {
+          void paperDoc.followTypstInclude(item.id);
+        },
+      });
+      return;
+    }
     void paperDoc.listFiles().then((files) => {
       const links = outgoingWikiLinks(parser.getDocument(), files).map(
         (link) => ({
@@ -350,6 +391,31 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     const current = relativeFromRoot(root, path);
     if (current === undefined) {
+      return;
+    }
+    if (paperDoc.typstMain() !== null) {
+      void paperDoc.readNotes().then((notes) => {
+        const hits = incomingTypstIncludes(current, notes).map((hit) => ({
+          id: `${hit.path}:${hit.line}`,
+          title: `${hit.path}:${hit.line}`,
+          detail: hit.text.trim(),
+        }));
+        palette.open({
+          placeholder: "Eingehende Includes",
+          load: (query) =>
+            filterByQuery(
+              hits,
+              query,
+              (item) => `${item.title} ${item.detail ?? ""}`,
+            ),
+          onPick: (item) => {
+            const split = item.id.lastIndexOf(":");
+            const relative = item.id.slice(0, split);
+            const line = Number(item.id.slice(split + 1));
+            void paperDoc.openProjectFile(relative, line);
+          },
+        });
+      });
       return;
     }
     void Promise.all([paperDoc.listFiles(), paperDoc.readNotes()]).then(
