@@ -18,9 +18,12 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("hides ATX hashes and their required space in view", () => {
+  it("hides ATX hashes and their required space in graphic view", () => {
     expect(
-      decorationSpecs(parseMarkdown("# Title"), { showMarks: false }),
+      decorationSpecs(parseMarkdown("# Title"), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "line-h1", from: 0, to: 7 },
       { kind: "hide", from: 0, to: 2 },
@@ -37,9 +40,98 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("hides strong markers in view and keeps the inner style", () => {
+  it("keeps inline marks visible without graphic rendering and still styles the inner text", () => {
     expect(
       decorationSpecs(parseMarkdown("say **hi**"), { showMarks: false }),
+    ).toEqual([
+      { kind: "mark", from: 4, to: 6 },
+      { kind: "strong", from: 6, to: 8 },
+      { kind: "mark", from: 8, to: 10 },
+    ]);
+    expect(
+      decorationSpecs(parseMarkdown("*x*"), { showMarks: false }),
+    ).toEqual([
+      { kind: "mark", from: 0, to: 1 },
+      { kind: "em", from: 1, to: 2 },
+      { kind: "mark", from: 2, to: 3 },
+    ]);
+    expect(
+      decorationSpecs(parseMarkdown("`x`"), { showMarks: false }),
+    ).toEqual([
+      { kind: "mark", from: 0, to: 1 },
+      { kind: "code", from: 1, to: 2 },
+      { kind: "mark", from: 2, to: 3 },
+    ]);
+    expect(
+      decorationSpecs(parseMarkdown("[docs](https://example.com)"), {
+        showMarks: false,
+      }),
+    ).toEqual([
+      { kind: "mark", from: 0, to: 1 },
+      { kind: "link", from: 1, to: 5 },
+      { kind: "mark", from: 5, to: 27 },
+    ]);
+    expect(
+      decorationSpecs(parseMarkdown("[[Note]]"), { showMarks: false }),
+    ).toEqual([
+      { kind: "mark", from: 0, to: 2 },
+      { kind: "wiki", from: 2, to: 6 },
+      { kind: "mark", from: 6, to: 8 },
+    ]);
+  });
+
+  it("keeps block markup visible without graphic rendering", () => {
+    expect(
+      decorationSpecs(parseMarkdown("# Title"), { showMarks: false }),
+    ).toEqual([
+      { kind: "line-h1", from: 0, to: 7 },
+      { kind: "atx", from: 0, to: 2 },
+    ]);
+    expect(
+      decorationSpecs(parseMarkdown("> hi"), { showMarks: false }),
+    ).toEqual([
+      { kind: "line-blockquote", from: 0, to: 4, quotePart: "only" },
+      { kind: "mark", from: 0, to: 2 },
+    ]);
+    const fence = "```\nhi\n```";
+    expect(
+      decorationSpecs(parseMarkdown(fence), { showMarks: false }),
+    ).toEqual([
+      { kind: "fence", from: 0, to: 4 },
+      { kind: "codeblock", from: 4, to: 7 },
+      { kind: "fence", from: 7, to: 10 },
+    ]);
+    const table = "|a|\n|-|\n|b|";
+    expect(
+      decorationSpecs(parseMarkdown(table), { showMarks: false }),
+    ).toEqual([
+      { kind: "table-pipe", from: 0, to: 1 },
+      { kind: "table-pipe", from: 2, to: 3 },
+      { kind: "table-pipe", from: 4, to: 5 },
+      { kind: "table-pipe", from: 6, to: 7 },
+      { kind: "table-pipe", from: 8, to: 9 },
+      { kind: "table-pipe", from: 10, to: 11 },
+      { kind: "table-header", from: 1, to: 2 },
+    ]);
+    expect(
+      decorationSpecs(parseMarkdown("![logo](pic.png)"), { showMarks: false }),
+    ).toEqual([
+      { kind: "mark", from: 0, to: 2 },
+      { kind: "image", from: 2, to: 6 },
+      { kind: "mark", from: 6, to: 16 },
+    ]);
+    const hr = "before\n---\nafter";
+    expect(
+      decorationSpecs(parseMarkdown(hr), { showMarks: false, source: hr }),
+    ).toEqual([{ kind: "mark", from: 7, to: 10 }]);
+  });
+
+  it("hides strong markers in graphic view and keeps the inner style", () => {
+    expect(
+      decorationSpecs(parseMarkdown("say **hi**"), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "hide", from: 4, to: 6 },
       { kind: "strong", from: 6, to: 8 },
@@ -51,6 +143,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("**`idoit.info`**"), {
         showMarks: false,
+        graphic: true,
       }),
     ).toEqual([
       { kind: "hide", from: 0, to: 2 },
@@ -78,7 +171,7 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("styles a wiki link and hides its marks in view", () => {
+  it("styles a wiki link and hides its marks in graphic view", () => {
     expect(
       decorationSpecs(parseMarkdown("[[Note]]"), { showMarks: true }),
     ).toEqual([
@@ -87,7 +180,10 @@ describe("decorationSpecs", () => {
       { kind: "mark", from: 6, to: 8 },
     ]);
     expect(
-      decorationSpecs(parseMarkdown("[[Note|shown]]"), { showMarks: false }),
+      decorationSpecs(parseMarkdown("[[Note|shown]]"), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "hide", from: 0, to: 2 },
       { kind: "hide", from: 2, to: 7 },
@@ -96,17 +192,20 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("mutes frontmatter while editing and hides it in view", () => {
+  it("mutes frontmatter while editing and hides it in graphic view", () => {
     const source = "---\ntitle: Hi\n---\n";
     expect(
       decorationSpecs(parseMarkdown(source), { showMarks: true }),
     ).toEqual([{ kind: "frontmatter", from: 0, to: 18 }]);
     expect(
-      decorationSpecs(parseMarkdown(source), { showMarks: false }),
+      decorationSpecs(parseMarkdown(source), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([{ kind: "hide", from: 0, to: 18 }]);
   });
 
-  it("styles quote prefixes and hides them in view", () => {
+  it("styles quote prefixes and hides them in graphic view", () => {
     expect(
       decorationSpecs(parseMarkdown("> hi"), { showMarks: true }),
     ).toEqual([
@@ -114,17 +213,23 @@ describe("decorationSpecs", () => {
       { kind: "mark", from: 0, to: 2 },
     ]);
     expect(
-      decorationSpecs(parseMarkdown("> hi"), { showMarks: false }),
+      decorationSpecs(parseMarkdown("> hi"), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "line-blockquote", from: 0, to: 4, quotePart: "only" },
       { kind: "hide", from: 0, to: 2 },
     ]);
   });
 
-  it("styles a fenced code body and hides fences in view", () => {
+  it("styles a fenced code body and hides fences in graphic view", () => {
     const source = "```\nhi\n```";
     expect(
-      decorationSpecs(parseMarkdown(source), { showMarks: false }),
+      decorationSpecs(parseMarkdown(source), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "hide", from: 0, to: 4 },
       { kind: "codeblock", from: 4, to: 7 },
@@ -132,7 +237,7 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("styles table pipes and header cells, and hides the delimiter in view", () => {
+  it("styles table pipes and header cells, and hides the delimiter in graphic view", () => {
     const source = "|a|\n|-|\n|b|";
     expect(
       decorationSpecs(parseMarkdown(source), { showMarks: true }),
@@ -146,7 +251,10 @@ describe("decorationSpecs", () => {
       { kind: "table-header", from: 1, to: 2 },
     ]);
     expect(
-      decorationSpecs(parseMarkdown(source), { showMarks: false }),
+      decorationSpecs(parseMarkdown(source), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "table-pipe", from: 0, to: 1 },
       { kind: "table-pipe", from: 2, to: 3 },
@@ -157,10 +265,11 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("styles an external link like a wiki link", () => {
+  it("hides an external link's marks in graphic view", () => {
     expect(
       decorationSpecs(parseMarkdown("[docs](https://example.com)"), {
         showMarks: false,
+        graphic: true,
       }),
     ).toEqual([
       { kind: "hide", from: 0, to: 1 },
@@ -169,9 +278,12 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("replaces an image with a widget in view", () => {
+  it("replaces an image with a widget in graphic view", () => {
     expect(
-      decorationSpecs(parseMarkdown("![logo](pic.png)"), { showMarks: false }),
+      decorationSpecs(parseMarkdown("![logo](pic.png)"), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       {
         kind: "image-widget",
@@ -192,7 +304,10 @@ describe("decorationSpecs", () => {
       { kind: "todo-widget", from: 2, to: 5, checked: false },
     ]);
     expect(
-      decorationSpecs(parseMarkdown("- [x] milk"), { showMarks: false }),
+      decorationSpecs(parseMarkdown("- [x] milk"), {
+        showMarks: false,
+        graphic: true,
+      }),
     ).toEqual([
       { kind: "line-todo", from: 0, to: 10 },
       { kind: "hide", from: 0, to: 2 },
@@ -321,13 +436,14 @@ describe("decorationSpecs", () => {
     ).toEqual([
       { kind: "table-pipe", from: 0, to: 1 },
       { kind: "table-pipe", from: 2, to: 3 },
+      { kind: "table-pipe", from: 4, to: 5 },
+      { kind: "table-pipe", from: 6, to: 7 },
       { kind: "table-pipe", from: 8, to: 9 },
       { kind: "table-pipe", from: 13, to: 14 },
       { kind: "table-header", from: 1, to: 2 },
-      { kind: "hide", from: 9, to: 10 },
+      { kind: "mark", from: 9, to: 10 },
       { kind: "code", from: 10, to: 12 },
-      { kind: "hide", from: 12, to: 13 },
-      { kind: "hide", from: 4, to: 8 },
+      { kind: "mark", from: 12, to: 13 },
     ]);
   });
 
@@ -387,10 +503,11 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("hides edit marks when the caret is outside the construct", () => {
+  it("hides edit marks when the caret is outside the construct in graphic mode", () => {
     expect(
       decorationSpecs(parseMarkdown("say **hi**"), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -401,6 +518,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("plain\n# Title"), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -410,6 +528,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("x [[Note]]"), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -420,6 +539,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("x\n> hi"), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -430,6 +550,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown(fence), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -440,6 +561,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("x\n- [ ] milk"), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -450,6 +572,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown("x ![logo](pic.png)"), {
         showMarks: true,
+        graphic: true,
         caret: 0,
       }),
     ).toEqual([
@@ -468,12 +591,14 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown(source), {
         showMarks: false,
+        graphic: true,
         source,
       }),
     ).toEqual([{ kind: "hr-widget", from: 7, to: 11 }]);
     expect(
       decorationSpecs(parseMarkdown(source), {
         showMarks: true,
+        graphic: true,
         caret: 0,
         source,
       }),
@@ -492,6 +617,7 @@ describe("decorationSpecs", () => {
     expect(
       decorationSpecs(parseMarkdown(source), {
         showMarks: true,
+        graphic: true,
         caret: 8,
         source,
       }),
@@ -542,7 +668,7 @@ describe("decorationSpecs", () => {
     ]);
   });
 
-  it("colors callout lines and hides the type marker in view", () => {
+  it("colors callout lines and keeps the type marker without graphic rendering", () => {
     const source = "> [!info] Quelle\n> body";
     expect(
       decorationSpecs(parseMarkdown(source), {
@@ -557,7 +683,7 @@ describe("decorationSpecs", () => {
         calloutType: "info",
         quotePart: "first",
       },
-      { kind: "hide", from: 0, to: 2 },
+      { kind: "mark", from: 0, to: 2 },
       {
         kind: "line-blockquote",
         from: 17,
@@ -565,8 +691,8 @@ describe("decorationSpecs", () => {
         calloutType: "info",
         quotePart: "last",
       },
-      { kind: "hide", from: 17, to: 19 },
-      { kind: "hide", from: 2, to: 9 },
+      { kind: "mark", from: 17, to: 19 },
+      { kind: "mark", from: 2, to: 9 },
       { kind: "callout-title", from: 10, to: 16 },
     ]);
   });
@@ -608,16 +734,19 @@ describe("decorationRevealKey", () => {
     const blocks = parseMarkdown(source);
     const insideOpen = decorationRevealKey(blocks, {
       showMarks: true,
+      graphic: true,
       caret: 6,
       source,
     });
     const insideStill = decorationRevealKey(blocks, {
       showMarks: true,
+      graphic: true,
       caret: 7,
       source,
     });
     const outside = decorationRevealKey(blocks, {
       showMarks: true,
+      graphic: true,
       caret: 0,
       source,
     });
@@ -651,6 +780,7 @@ describe("atomicSyntaxRanges", () => {
     expect(
       atomicSyntaxRanges(blocks, {
         showMarks: true,
+        graphic: true,
         caret: 0,
         source,
       }),

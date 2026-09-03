@@ -1,7 +1,11 @@
+import { linesPerPage } from "./caret";
+import { renderTagBadges } from "./tagBadge";
+
 export type PaletteItem = {
   id: string;
   title: string;
   detail?: string;
+  tags?: readonly string[];
 };
 
 export type PaletteBinding = {
@@ -15,6 +19,34 @@ export type PaletteOpenOptions = {
   load: (query: string) => Promise<PaletteItem[]> | PaletteItem[];
   onPick: (item: PaletteItem) => void;
 };
+
+/**
+ * Returns the active index after moving a page, clamped to the list.
+ */
+export function indexAfterPage(
+  active: number,
+  itemCount: number,
+  direction: 1 | -1,
+  pageSize: number,
+): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+  const step = Math.max(1, pageSize);
+  return Math.min(itemCount - 1, Math.max(0, active + direction * step));
+}
+
+/**
+ * Returns how many palette items Page Up/Down should skip, overlapping one.
+ */
+function resultsPageSize(results: HTMLElement): number {
+  const first = results.children[0];
+  const itemHeight = first instanceof HTMLElement ? first.offsetHeight : 0;
+  if (itemHeight <= 0) {
+    return 1;
+  }
+  return linesPerPage(results.clientHeight, itemHeight);
+}
 
 /**
  * Binds a paper overlay that filters items from a query and picks with Enter.
@@ -43,11 +75,20 @@ export function bindPalette(
       const li = document.createElement("li");
       li.className = "palette-item";
       li.classList.toggle("is-active", index === active);
-      li.textContent = item.title;
+      const title = document.createElement("span");
+      title.className = "palette-item-title";
+      title.textContent = item.title;
+      li.append(title);
+      if (item.tags && item.tags.length > 0) {
+        const badges = document.createElement("span");
+        badges.className = "tag-badges";
+        renderTagBadges(badges, item.tags);
+        li.append(badges);
+      }
       if (item.detail) {
         const detail = document.createElement("span");
         detail.className = "palette-item-detail";
-        detail.textContent = `  ${item.detail}`;
+        detail.textContent = item.detail;
         li.append(detail);
       }
       li.addEventListener("mousedown", (event) => {
@@ -114,6 +155,21 @@ export function bindPalette(
         return;
       }
       active = (active - 1 + items.length) % items.length;
+      render();
+      return;
+    }
+    if (event.key === "PageDown" || event.key === "PageUp") {
+      event.preventDefault();
+      if (items.length === 0) {
+        return;
+      }
+      const direction = event.key === "PageDown" ? 1 : -1;
+      active = indexAfterPage(
+        active,
+        items.length,
+        direction,
+        resultsPageSize(results),
+      );
       render();
       return;
     }

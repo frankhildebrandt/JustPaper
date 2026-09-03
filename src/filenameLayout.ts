@@ -42,6 +42,9 @@ export function filenameFlowHiddenByPeek(
 /**
  * Extra top padding so the filename fits above the first line in normal view.
  */
-export function filenameReservePx(lineHeightPx: number): number {
-  return lineHeightPx * 1.5;
+export function filenameReservePx(
+  lineHeightPx: number,
+  filenameHeightPx: number = lineHeightPx,
+): number {
+  return filenameHeightPx + lineHeightPx * 0.5;
 }

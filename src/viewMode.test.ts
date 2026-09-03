@@ -7,6 +7,13 @@ describe("verticalPaddingPx", () => {
     expect(verticalPaddingPx("normal", 800, 16)).toEqual({ top: 32, bottom: 0 });
   });
 
+  it("grows the inset when the filename row wraps", () => {
+    expect(verticalPaddingPx("normal", 800, 16, 40)).toEqual({
+      top: 56,
+      bottom: 0,
+    });
+  });
+
   it("pads both ends so the first line can sit on the vertical center", () => {
     const originPx = verticalOriginPaddingPx(800, 16);
 

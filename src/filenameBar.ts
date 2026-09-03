@@ -4,9 +4,17 @@ import {
   filenameFlowTopPx,
   filenameFlowVisible,
 } from "./filenameLayout";
+import { renderTagBadges } from "./tagBadge";
+
+export type FilenameBarTargets = {
+  row: HTMLElement;
+  input: HTMLInputElement;
+  tags: HTMLElement;
+};
 
 export type FilenameBar = {
   setPath: (path: string | null) => void;
+  setTags: (tags: readonly string[]) => void;
   setScroller: (element: HTMLElement) => void;
   sync: () => void;
   disconnect: () => void;
@@ -16,19 +24,20 @@ export type FilenameBar = {
  * Binds the in-flow filename and the top-edge peek so either can rename.
  */
 export function bindFilenameBar(
-  flow: HTMLInputElement,
+  flow: FilenameBarTargets,
   onCommit: (name: string) => Promise<boolean> | boolean,
-  peek?: HTMLInputElement,
+  peek?: FilenameBarTargets,
+  onHeightChange?: (heightPx: number) => void,
 ): FilenameBar {
   let path: string | null = null;
   let editing: HTMLInputElement | undefined;
   let scroller: HTMLElement | undefined;
   let stopScroll: (() => void) | undefined;
-  const inputs = peek ? [flow, peek] : [flow];
+  const inputs = peek ? [flow.input, peek.input] : [flow.input];
   const observer = new ResizeObserver(() => {
     layout();
   });
-  observer.observe(flow);
+  observer.observe(flow.row);
 
   const show = (): void => {
     const name = displayName(path);
@@ -81,28 +90,29 @@ export function bindFilenameBar(
   };
 
   const layout = (): void => {
+    onHeightChange?.(flow.row.offsetHeight);
     if (!scroller) {
-      flow.style.opacity = "0";
-      flow.style.pointerEvents = "none";
+      flow.row.style.opacity = "0";
+      flow.row.style.pointerEvents = "none";
       return;
     }
     const style = getComputedStyle(scroller);
-    const lineHeightPx = parseFloat(style.lineHeight) || flow.offsetHeight;
+    const lineHeightPx = parseFloat(style.lineHeight) || flow.row.offsetHeight;
     const top = filenameFlowTopPx({
       paddingTopPx: parseFloat(style.paddingTop) || 0,
       scrollTopPx: scroller.scrollTop,
-      filenameHeightPx: flow.offsetHeight,
+      filenameHeightPx: flow.row.offsetHeight,
       gapPx: lineHeightPx * 0.45,
     });
-    flow.style.top = `${top}px`;
-    const peekVisible = peek?.classList.contains("is-visible") ?? false;
-    const peekHeight = peek?.offsetHeight ?? 40;
+    flow.row.style.top = `${top}px`;
+    const peekVisible = peek?.row.classList.contains("is-visible") ?? false;
+    const peekHeight = peek?.row.offsetHeight ?? 40;
     const visible =
-      filenameFlowVisible(top, flow.offsetHeight, scroller.clientHeight) &&
+      filenameFlowVisible(top, flow.row.offsetHeight, scroller.clientHeight) &&
       !filenameFlowHiddenByPeek(top, peekVisible, peekHeight);
-    const showFlow = visible || editing === flow;
-    flow.style.opacity = showFlow ? "1" : "0";
-    flow.style.pointerEvents = showFlow ? "auto" : "none";
+    const showFlow = visible || editing === flow.input;
+    flow.row.style.opacity = showFlow ? "1" : "0";
+    flow.row.style.pointerEvents = showFlow ? "auto" : "none";
   };
 
   for (const input of inputs) {
@@ -115,6 +125,13 @@ export function bindFilenameBar(
     setPath: (next: string | null): void => {
       path = next;
       show();
+    },
+    setTags: (tags: readonly string[]): void => {
+      renderTagBadges(flow.tags, tags);
+      if (peek) {
+        renderTagBadges(peek.tags, tags);
+      }
+      layout();
     },
     setScroller: (element: HTMLElement): void => {
       stopScroll?.();

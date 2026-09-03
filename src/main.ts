@@ -8,8 +8,9 @@ import "./chrome.css";
 import { bindAppMenu } from "./appMenu";
 import { offsetAtLine } from "./caret";
 import { bindDocument } from "./document";
+import { extractFrontmatterTags } from "./frontmatterTags";
 import { bindFilenameBar } from "./filenameBar";
-import { filterByQuery, fuzzyMatch } from "./fuzzyMatch";
+import { filterByQuery, fuzzyMatch, fuzzyMatchNotes } from "./fuzzyMatch";
 import { bindHighlightMode } from "./highlightMode";
 import { bindLinkHelper, type LinkHelperItem } from "./linkHelper";
 import { bindPalette } from "./palette";
@@ -121,12 +122,30 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   applyAssetBase();
   const filename = bindFilenameBar(
-    requiredElement("filename"),
+    {
+      row: requiredElement("filename-flow-row"),
+      input: requiredElement<HTMLInputElement>("filename"),
+      tags: requiredElement("filename-tags"),
+    },
     (name) => paperDoc.rename(name),
-    requiredElement<HTMLInputElement>("filename-peek"),
+    {
+      row: requiredElement("filename-peek-row"),
+      input: requiredElement<HTMLInputElement>("filename-peek"),
+      tags: requiredElement("filename-peek-tags"),
+    },
+    (heightPx) => {
+      view.setFilenameHeight(heightPx);
+    },
   );
-  filename.setPath(paperDoc.path());
+  const syncFilename = (): void => {
+    filename.setPath(paperDoc.path());
+    filename.setTags(extractFrontmatterTags(parser.getDocument()));
+  };
+  syncFilename();
   filename.setScroller(view.getHost().layoutElement);
+  parser.onChange(() => {
+    filename.setTags(extractFrontmatterTags(parser.getDocument()));
+  });
   let projectFiles: string[] | null = null;
   let linkHelperFrom: number | undefined;
   let linkHelperActive = 0;
@@ -261,7 +280,7 @@ window.addEventListener("DOMContentLoaded", () => {
     return false;
   });
   paperDoc.onSessionChange(() => {
-    filename.setPath(paperDoc.path());
+    syncFilename();
     applyAssetBase();
     projectFiles = null;
     syncLinkHelper();
@@ -294,9 +313,16 @@ window.addEventListener("DOMContentLoaded", () => {
       palette.open({
         placeholder: "Datei suchen",
         load: (query) =>
-          fuzzyMatch(files, query).map((path) => ({
-            id: path,
-            title: path,
+          fuzzyMatchNotes(
+            files.map((path) => ({
+              path,
+              tags: paperDoc.tagsFor(path),
+            })),
+            query,
+          ).map((hit) => ({
+            id: hit.path,
+            title: hit.path,
+            tags: hit.matchedTags,
           })),
         onPick: (item) => {
           void paperDoc.openProjectFile(item.id);
@@ -487,7 +513,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }, settings);
   applyChromePlatform();
   bindWindowChrome(document.documentElement, requiredElement("window-chrome"), {
-    reveal: [requiredElement("filename-peek")],
+    reveal: [requiredElement("filename-peek-row")],
     onChange: () => {
       filename.sync();
     },

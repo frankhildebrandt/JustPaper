@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { filterByQuery, fuzzyMatch } from "./fuzzyMatch";
+import {
+  filterByQuery,
+  fuzzyMatch,
+  fuzzyMatchNotes,
+  matchingTags,
+} from "./fuzzyMatch";
 
 describe("fuzzyMatch", () => {
   const files = ["Hello.md", "folder/Note.md", "drafts/ideas.txt"];
@@ -47,5 +52,79 @@ describe("filterByQuery", () => {
         (item) => item.title,
       ),
     ).toEqual(["Earlier.md"]);
+  });
+});
+
+describe("matchingTags", () => {
+  it("returns no tags when the query is empty", () => {
+    expect(matchingTags(["work", "inbox"], "")).toEqual([]);
+  });
+
+  it("returns only tags that contain the query as a subsequence", () => {
+    expect(matchingTags(["work", "inbox", "project"], "wk")).toEqual(["work"]);
+  });
+
+  it("is case-insensitive and ignores a leading hash on the query", () => {
+    expect(matchingTags(["Inbox", "work"], "#IN")).toEqual(["Inbox"]);
+  });
+});
+
+describe("fuzzyMatchNotes", () => {
+  const notes = [
+    { path: "Hello.md", tags: ["inbox"] },
+    { path: "folder/Note.md", tags: ["work"] },
+    { path: "drafts/ideas.txt", tags: [] },
+  ];
+
+  it("returns every file and no badges when the query is empty", () => {
+    expect(fuzzyMatchNotes(notes, "")).toEqual([
+      { path: "Hello.md", matchedTags: [] },
+      { path: "folder/Note.md", matchedTags: [] },
+      { path: "drafts/ideas.txt", matchedTags: [] },
+    ]);
+  });
+
+  it("matches a path without attaching unmatched tags", () => {
+    expect(fuzzyMatchNotes(notes, "Hello")).toEqual([
+      { path: "Hello.md", matchedTags: [] },
+    ]);
+  });
+
+  it("matches a tag and returns only the tags that hit", () => {
+    expect(fuzzyMatchNotes(notes, "work")).toEqual([
+      { path: "folder/Note.md", matchedTags: ["work"] },
+    ]);
+  });
+
+  it("ranks path hits before tag-only hits", () => {
+    expect(
+      fuzzyMatchNotes(
+        [
+          { path: "zeta.md", tags: ["note"] },
+          { path: "a/Note.md", tags: [] },
+          { path: "Note.md", tags: [] },
+        ],
+        "Note",
+      ),
+    ).toEqual([
+      { path: "Note.md", matchedTags: [] },
+      { path: "a/Note.md", matchedTags: [] },
+      { path: "zeta.md", matchedTags: ["note"] },
+    ]);
+  });
+
+  it("sorts tag-only hits alphabetically by path", () => {
+    expect(
+      fuzzyMatchNotes(
+        [
+          { path: "b.md", tags: ["inbox"] },
+          { path: "a.md", tags: ["inbox"] },
+        ],
+        "inbox",
+      ),
+    ).toEqual([
+      { path: "a.md", matchedTags: ["inbox"] },
+      { path: "b.md", matchedTags: ["inbox"] },
+    ]);
   });
 });

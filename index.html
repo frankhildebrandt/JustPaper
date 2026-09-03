@@ -25,20 +25,32 @@
       </div>
       <div class="sheet">
         <div class="margin margin-left" data-tauri-drag-region></div>
-        <input
-          id="filename-peek"
-          class="filename filename-peek"
-          spellcheck="false"
-          autocomplete="off"
-          aria-label="Filename"
-        />
-        <input
-          id="filename"
-          class="filename filename-flow"
-          spellcheck="false"
-          autocomplete="off"
-          aria-label="Filename"
-        />
+        <div
+          id="filename-peek-row"
+          class="filename-row filename-peek"
+        >
+          <input
+            id="filename-peek"
+            class="filename"
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="Filename"
+          />
+          <div id="filename-peek-tags" class="tag-badges" hidden></div>
+        </div>
+        <div
+          id="filename-flow-row"
+          class="filename-row filename-flow"
+        >
+          <input
+            id="filename"
+            class="filename"
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="Filename"
+          />
+          <div id="filename-tags" class="tag-badges" hidden></div>
+        </div>
         <div id="highlight" class="highlight-layer" aria-hidden="true" hidden></div>
         <textarea id="editor" spellcheck="false" autocomplete="off"></textarea>
         <div id="markdown" class="markdown-host" hidden></div>
