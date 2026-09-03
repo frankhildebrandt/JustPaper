@@ -1,5 +1,13 @@
 {
   "bundle": {
     "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBQTEzQUU4RTA2QUQxMkMKUldRczBXcmc2RHFoeXFIS2RZQlRUclNpM1U1YjhsNnVUeUZLRnhTRVZDNDl1L1ZIVXowLzFhSUgK",
+      "endpoints": [
+        "https://github.com/frankhildebrandt/JustPaper/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
