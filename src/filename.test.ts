@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dirname,
   displayName,
   renamePath,
   untitledCreatePath,
@@ -56,5 +57,15 @@ describe("untitledCreatePath", () => {
     expect(untitledCreatePath("/vault", "Hello", "note.typ")).toBe(
       "/vault/Hello.typ",
     );
+  });
+});
+
+describe("dirname", () => {
+  it("returns the parent folder of a file", () => {
+    expect(dirname("/vault/notes.md")).toBe("/vault");
+  });
+
+  it("returns slash for a file at the root", () => {
+    expect(dirname("/notes.md")).toBe("/");
   });
 });

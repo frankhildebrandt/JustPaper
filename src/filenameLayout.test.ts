@@ -55,4 +55,8 @@ describe("filenameReservePx", () => {
   it("reserves one line plus a half-line gap above the first text line", () => {
     expect(filenameReservePx(16)).toBe(24);
   });
+
+  it("grows with a wrapped filename row", () => {
+    expect(filenameReservePx(16, 40)).toBe(48);
+  });
 });

@@ -9,6 +9,7 @@ import {
   applySave,
   createDocumentSession,
   isDirty,
+  shouldApplyDiskText,
 } from "./documentSession";
 
 describe("isDirty", () => {
@@ -18,6 +19,20 @@ describe("isDirty", () => {
 
   it("is dirty after the editor text changes", () => {
     expect(isDirty(createDocumentSession(), "hello")).toBe(true);
+  });
+});
+
+describe("shouldApplyDiskText", () => {
+  it("applies when the editor is clean and disk differs", () => {
+    expect(shouldApplyDiskText("# Hello", "# Hello", "# World")).toBe(true);
+  });
+
+  it("skips when the editor already matches disk", () => {
+    expect(shouldApplyDiskText("# Hello", "# Hello", "# Hello")).toBe(false);
+  });
+
+  it("skips when the editor has unsaved edits", () => {
+    expect(shouldApplyDiskText("# Draft", "# Hello", "# World")).toBe(false);
   });
 });
 

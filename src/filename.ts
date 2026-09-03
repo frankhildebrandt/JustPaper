@@ -90,7 +90,10 @@ function basename(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-function dirname(path: string): string {
+/**
+ * Returns the parent directory of a file path.
+ */
+export function dirname(path: string): string {
   const trimmed = path.replace(/\/+$/, "");
   const slash = trimmed.lastIndexOf("/");
   if (slash <= 0) {

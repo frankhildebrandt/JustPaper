@@ -23,6 +23,18 @@ export function isDirty(session: DocumentSession, currentText: string): boolean 
 }
 
 /**
+ * Returns whether an external disk snapshot should replace the editor.
+ * Skips when the buffer is already in sync or still has unsaved edits.
+ */
+export function shouldApplyDiskText(
+  editorText: string,
+  lastSaved: string,
+  diskText: string,
+): boolean {
+  return diskText !== editorText && editorText === lastSaved;
+}
+
+/**
  * Returns an untitled session that keeps recents and the project root.
  */
 export function applyNew(session: DocumentSession): DocumentSession {

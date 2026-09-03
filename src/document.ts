@@ -4,6 +4,7 @@ import {
   mkdir,
   readTextFile,
   rename,
+  watch,
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -18,13 +19,23 @@ import {
   applySave,
   createDocumentSession,
   isDirty,
+  shouldApplyDiskText,
   type DocumentSession,
 } from "./documentSession";
 import {
+  dirname,
   displayName,
   renamePath,
   untitledCreatePath,
 } from "./filename";
+import {
+  bindOpenFileWatch,
+  OPEN_FILE_WATCH_DELAY_MS,
+} from "./openFileWatch";
+import {
+  bindProjectTagIndex,
+  PROJECT_TAG_WATCH_DELAY_MS,
+} from "./projectTagIndex";
 import {
   listProjectFiles,
   readProjectNotes,
@@ -98,6 +109,7 @@ export type DocumentBinding = {
   listFiles: () => Promise<string[]>;
   readNotes: () => Promise<ProjectNote[]>;
   search: (query: string) => Promise<SearchHit[]>;
+  tagsFor: (relativePath: string) => string[];
   path: () => string | null;
   projectRoot: () => string | null;
   typstMain: () => string | null;
@@ -173,6 +185,8 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   const sessionListeners = new Set<() => void>();
   let unlistenClose: (() => void) | undefined;
   let applying = false;
+  let syncTagIndex = (): void => undefined;
+  let indexOpenFile = (): void => undefined;
   const stored = loadStoredSession();
   let carets = stored?.carets ?? {};
   if (stored?.typstMain) {
@@ -221,6 +235,15 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     ) {
       for (const listener of sessionListeners) {
         listener();
+      }
+      fileWatch.follow(session.projectRoot !== null ? session.path : null);
+      if (
+        previous.projectRoot !== session.projectRoot ||
+        previous.typstMain !== session.typstMain
+      ) {
+        syncTagIndex();
+      } else {
+        indexOpenFile();
       }
     }
   };
@@ -298,6 +321,65 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     void writeTo(session.path);
   }, AUTOSAVE_DELAY_MS);
+
+  /**
+   * Reloads the open file from disk when the buffer is clean and the file changed.
+   */
+  const applyExternalChange = async (): Promise<void> => {
+    if (applying) {
+      return;
+    }
+    if (session.projectRoot === null || session.path === null) {
+      return;
+    }
+    const path = session.path;
+    let disk: string;
+    try {
+      disk = await readTextFile(path);
+    } catch {
+      return;
+    }
+    if (session.path !== path) {
+      return;
+    }
+    if (!shouldApplyDiskText(content.getText(), session.lastSaved, disk)) {
+      return;
+    }
+    const caret = content.getCaretOffset();
+    const previous = session;
+    session = applyOpen(session, path, disk);
+    applying = true;
+    content.setText(disk);
+    content.setCaretOffset(clampCaretOffset(caret, disk.length));
+    applying = false;
+    notify(previous);
+  };
+
+  const fileWatch = bindOpenFileWatch(
+    async (path, onEvent) => {
+      if (!isTauriRuntime()) {
+        return () => {};
+      }
+      const dir = dirname(path);
+      if (dir === "") {
+        return () => {};
+      }
+      try {
+        return await watch(
+          dir,
+          (event) => {
+            onEvent(event.paths);
+          },
+          { delayMs: OPEN_FILE_WATCH_DELAY_MS },
+        );
+      } catch {
+        return () => {};
+      }
+    },
+    () => {
+      void applyExternalChange();
+    },
+  );
 
   const adoptFile = async (
     path: string,
@@ -640,6 +722,68 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return searchProject(session.projectRoot, query);
   };
 
+  const tagIndex = bindProjectTagIndex({
+    readNotes: async (root) => {
+      if (session.typstMain !== null) {
+        return readNotes();
+      }
+      return readProjectNotes(root);
+    },
+    readFile: async (path) => {
+      try {
+        return await readTextFile(path);
+      } catch {
+        return null;
+      }
+    },
+    startWatch: async (root, onEvent) => {
+      if (!isTauriRuntime()) {
+        return () => {};
+      }
+      try {
+        return await watch(
+          root,
+          (event) => {
+            onEvent(event.paths);
+          },
+          { delayMs: PROJECT_TAG_WATCH_DELAY_MS, recursive: true },
+        );
+      } catch {
+        return () => {};
+      }
+    },
+  });
+  indexOpenFile = (): void => {
+    if (session.projectRoot === null || session.path === null) {
+      return;
+    }
+    const relative = relativeFromRoot(session.projectRoot, session.path);
+    if (relative === undefined) {
+      return;
+    }
+    tagIndex.setFile(relative, content.getText());
+  };
+  syncTagIndex = (): void => {
+    if (session.projectRoot === null) {
+      tagIndex.follow(null);
+      return;
+    }
+    const root = session.projectRoot;
+    if (session.typstMain !== null) {
+      void listTypstGraph().then((files) => {
+        if (session.projectRoot !== root || session.typstMain === null) {
+          return;
+        }
+        tagIndex.follow(root, files);
+        indexOpenFile();
+      });
+      return;
+    }
+    tagIndex.follow(root);
+    indexOpenFile();
+  };
+  syncTagIndex();
+
   const followTypstInclude = async (includePath: string): Promise<void> => {
     if (session.projectRoot === null || session.path === null) {
       return;
@@ -699,6 +843,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (applying) {
       return;
     }
+    indexOpenFile();
     if (session.projectRoot === null || session.path === null) {
       return;
     }
@@ -749,6 +894,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     listFiles,
     readNotes,
     search,
+    tagsFor: (relativePath) => tagIndex.tagsFor(relativePath),
     path: () => session.path,
     projectRoot: () => session.projectRoot,
     typstMain: () => session.typstMain,
@@ -770,6 +916,8 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       caretPersist.flush();
       persistSession();
       autosave.cancel();
+      fileWatch.disconnect();
+      tagIndex.disconnect();
       stopChange();
       stopCaret();
       unlistenClose?.();

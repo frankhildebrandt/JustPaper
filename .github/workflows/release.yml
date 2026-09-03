@@ -51,6 +51,8 @@ jobs:
         env:
           CI: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: JustPaper v__VERSION__
@@ -61,7 +63,7 @@ jobs:
             Homebrew: `brew tap frankhildebrandt/justpaper && brew install --cask justpaper`
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --config src-tauri/tauri.ci.conf.json
 
   update-cask:
     needs: publish-tauri

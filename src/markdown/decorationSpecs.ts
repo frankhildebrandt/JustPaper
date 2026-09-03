@@ -77,7 +77,9 @@ export type DecorationOptions = {
 };
 
 /**
- * Turns parsed blocks into decoration ranges for edit and view.
+ * Turns parsed blocks into decoration ranges.
+ * Grafisch off keeps markup visible with inner styles; Grafisch on hides marks
+ * (except at the caret in edit) and may replace blocks with widgets.
  */
 export function decorationSpecs(
   blocks: Block[],
@@ -106,7 +108,7 @@ export function decorationSpecs(
         });
       } else {
         specs.push({
-          kind: options.showMarks ? "mark" : "hide",
+          kind: marksShown(options, block.from, block.to) ? "mark" : "hide",
           from: block.from,
           to: block.to,
         });
@@ -424,11 +426,18 @@ function widgetTo(source: string, to: number): number {
   return source[to] === "\n" ? to + 1 : to;
 }
 
+/**
+ * Whether syntax marks stay in the document. Grafisch off always shows them;
+ * Grafisch on hides in view, and in edit except while the caret is inside.
+ */
 function marksShown(
   options: DecorationOptions,
   from: number,
   to: number,
 ): boolean {
+  if (options.graphic !== true) {
+    return true;
+  }
   if (!options.showMarks) {
     return false;
   }

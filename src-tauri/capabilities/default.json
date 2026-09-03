@@ -19,6 +19,8 @@
     "fs:allow-rename",
     "fs:allow-mkdir",
     "fs:allow-create",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
     "allow-list-project-files",
     "allow-search-project",
     "allow-read-project-notes",
