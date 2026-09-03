@@ -15,7 +15,7 @@ brew tap frankhildebrandt/justpaper
 brew install --cask justpaper
 ```
 
-Or download the `.dmg` from [Releases](https://github.com/frankhildebrandt/JustPaper/releases). macOS builds are ad-hoc signed; first open is right-click → **Open**. Homebrew strips quarantine for you.
+Or download the `.dmg` from [Releases](https://github.com/frankhildebrandt/JustPaper/releases). macOS builds are signed with Developer ID and notarized.
 
 ### Ubuntu
 
