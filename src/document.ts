@@ -37,6 +37,7 @@ import {
   PROJECT_TAG_WATCH_DELAY_MS,
 } from "./projectTagIndex";
 import {
+  listProjectAssets,
   listProjectFiles,
   readProjectNotes,
   searchProject,
@@ -63,6 +64,15 @@ import {
   resolveTypstInclude,
 } from "./typst/includes";
 import {
+  createFileHistory,
+  goBack as hopBack,
+  goForward as hopForward,
+  recordVisit,
+} from "./fileHistory";
+import { openLocalPath } from "./openLocalPath";
+import {
+  isNotePath,
+  isWikiAssetTarget,
   resolveWikiLink,
   wikiCreatePath,
 } from "./wikiLink";
@@ -107,6 +117,7 @@ export type DocumentBinding = {
   followWiki: (target: string) => Promise<void>;
   followTypstInclude: (includePath: string) => Promise<void>;
   listFiles: () => Promise<string[]>;
+  listAssets: () => Promise<string[]>;
   readNotes: () => Promise<ProjectNote[]>;
   search: (query: string) => Promise<SearchHit[]>;
   tagsFor: (relativePath: string) => string[];
@@ -114,6 +125,8 @@ export type DocumentBinding = {
   projectRoot: () => string | null;
   typstMain: () => string | null;
   recents: () => string[];
+  goBack: () => Promise<void>;
+  goForward: () => Promise<void>;
   onRecentsChange: (listener: () => void) => () => void;
   onSessionChange: (listener: () => void) => () => void;
   disconnect: () => void;
@@ -189,6 +202,8 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   let indexOpenFile = (): void => undefined;
   const stored = loadStoredSession();
   let carets = stored?.carets ?? {};
+  let history = createFileHistory();
+  let navigatingHistory = false;
   if (stored?.typstMain) {
     session = applyOpenTypstDocument(session, stored.typstMain);
   } else if (stored?.root) {
@@ -381,10 +396,17 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     },
   );
 
+  const rememberVisit = (from: string | null, to: string | null): void => {
+    if (navigatingHistory || from === to) {
+      return;
+    }
+    history = recordVisit(history, from);
+  };
+
   const adoptFile = async (
     path: string,
     caretLine?: number,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     let text: string;
     try {
       text = await readTextFile(path);
@@ -393,7 +415,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       session = applyForgetRecent(session, path);
       notify(previous);
       await showError(`“${fileName(path)}” could not be opened.`);
-      return;
+      return false;
     }
     const previous = session;
     session = applyOpen(session, path, text);
@@ -405,27 +427,59 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       );
     }
     applying = false;
+    rememberVisit(previous.path, path);
     notify(previous);
     content.focus();
     content.revealCaret();
+    return true;
   };
 
   const switchTo = async (
     path: string,
     caretLine?: number,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     autosave.flush();
     if (session.path === path) {
       if (caretLine !== undefined) {
         content.setText(content.getText(), caretLine);
       }
       content.focus();
-      return;
+      return true;
     }
     if (!(await confirmProceed())) {
+      return false;
+    }
+    return adoptFile(path, caretLine);
+  };
+
+  const goBack = async (): Promise<void> => {
+    const hop = hopBack(history, session.path);
+    if (hop === undefined) {
       return;
     }
-    await adoptFile(path, caretLine);
+    navigatingHistory = true;
+    try {
+      if (await switchTo(hop.path)) {
+        history = hop.history;
+      }
+    } finally {
+      navigatingHistory = false;
+    }
+  };
+
+  const goForward = async (): Promise<void> => {
+    const hop = hopForward(history, session.path);
+    if (hop === undefined) {
+      return;
+    }
+    navigatingHistory = true;
+    try {
+      if (await switchTo(hop.path)) {
+        history = hop.history;
+      }
+    } finally {
+      navigatingHistory = false;
+    }
   };
 
   const newDocument = async (): Promise<void> => {
@@ -438,6 +492,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     applying = true;
     content.setText("");
     applying = false;
+    rememberVisit(previous.path, null);
     notify(previous);
     content.focus();
   };
@@ -483,6 +538,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       applying = true;
       content.setText("");
       applying = false;
+      rememberVisit(previous.path, null);
     }
     notify(previous);
     content.focus();
@@ -677,6 +733,13 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return listProjectFiles(session.projectRoot);
   };
 
+  const listAssets = async (): Promise<string[]> => {
+    if (session.projectRoot === null) {
+      return [];
+    }
+    return listProjectAssets(session.projectRoot);
+  };
+
   const readNotes = async (): Promise<ProjectNote[]> => {
     if (session.projectRoot === null) {
       return [];
@@ -810,31 +873,44 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     autosave.flush();
     const files = await listFiles();
-    const relative = resolveWikiLink(target, files);
-    const dest =
-      relative === undefined
-        ? wikiCreatePath(target, session.projectRoot, session.path)
-        : joinRoot(session.projectRoot, relative);
-    if (relative === undefined) {
-      if (await exists(dest)) {
-        await switchTo(dest);
+    const assets = await listAssets();
+    const relative = resolveWikiLink(target, files, assets);
+    if (relative !== undefined) {
+      const dest = joinRoot(session.projectRoot, relative);
+      if (!isNotePath(relative)) {
+        try {
+          await openLocalPath(dest);
+        } catch {
+          await showError(`“${fileName(dest)}” could not be opened.`);
+        }
         return;
       }
-      const parent = parentDir(dest);
-      if (parent) {
-        try {
-          await mkdir(parent, { recursive: true });
-        } catch {
-          await showError(`“${fileName(dest)}” could not be created.`);
-          return;
-        }
-      }
+      await switchTo(dest);
+      return;
+    }
+    if (isWikiAssetTarget(target)) {
+      await showError(`“${fileName(target)}” could not be opened.`);
+      return;
+    }
+    const dest = wikiCreatePath(target, session.projectRoot, session.path);
+    if (await exists(dest)) {
+      await switchTo(dest);
+      return;
+    }
+    const parent = parentDir(dest);
+    if (parent) {
       try {
-        await writeTextFile(dest, "");
+        await mkdir(parent, { recursive: true });
       } catch {
         await showError(`“${fileName(dest)}” could not be created.`);
         return;
       }
+    }
+    try {
+      await writeTextFile(dest, "");
+    } catch {
+      await showError(`“${fileName(dest)}” could not be created.`);
+      return;
     }
     await switchTo(dest);
   };
@@ -892,6 +968,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     followWiki,
     followTypstInclude,
     listFiles,
+    listAssets,
     readNotes,
     search,
     tagsFor: (relativePath) => tagIndex.tagsFor(relativePath),
@@ -899,6 +976,8 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     projectRoot: () => session.projectRoot,
     typstMain: () => session.typstMain,
     recents: () => session.recents,
+    goBack,
+    goForward,
     onRecentsChange: (listener: () => void): (() => void) => {
       recentsListeners.add(listener);
       return () => {

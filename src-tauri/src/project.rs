@@ -24,18 +24,32 @@ pub struct ProjectNote {
  */
 #[tauri::command]
 pub fn list_project_files(root: String) -> Result<Vec<String>, String> {
-    let root = PathBuf::from(root);
+    walk_project_files(&PathBuf::from(root), is_note)
+}
+
+/**
+ * Lists project-relative files that are not notes, such as PDFs.
+ */
+#[tauri::command]
+pub fn list_project_assets(root: String) -> Result<Vec<String>, String> {
+    walk_project_files(&PathBuf::from(root), |path| !is_note(path))
+}
+
+fn walk_project_files(
+    root: &Path,
+    keep: impl Fn(&Path) -> bool,
+) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
-    for entry in WalkBuilder::new(&root).standard_filters(true).build() {
+    for entry in WalkBuilder::new(root).standard_filters(true).build() {
         let entry = entry.map_err(|error| error.to_string())?;
         if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
             continue;
         }
         let path = entry.path();
-        if !is_note(path) {
+        if !keep(path) {
             continue;
         }
-        if let Some(relative) = relative_path(&root, path) {
+        if let Some(relative) = relative_path(root, path) {
             files.push(relative);
         }
     }
@@ -186,6 +200,18 @@ mod tests {
             assert_eq!(notes[1].content, "= Title\n");
             assert_eq!(notes[2].path, "sub/Note.txt");
             assert_eq!(notes[2].content, "needle here");
+        });
+    }
+
+    #[test]
+    fn lists_non_note_assets() {
+        with_vault(|dir| {
+            fs::write(dir.join("scan.pdf"), [1, 2, 3]).expect("write pdf");
+            let assets = list_project_assets(dir.to_string_lossy().into_owned()).unwrap();
+            assert_eq!(
+                assets,
+                vec!["binary.bin".to_string(), "scan.pdf".to_string()]
+            );
         });
     }
 }

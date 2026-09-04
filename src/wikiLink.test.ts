@@ -72,6 +72,22 @@ describe("resolveWikiLink", () => {
   it("returns undefined when nothing matches", () => {
     expect(resolveWikiLink("Missing", files)).toBeUndefined();
   });
+
+  it("matches a PDF by its file name", () => {
+    expect(
+      resolveWikiLink("scan.pdf", ["Hello.md"], ["scan.pdf", "photo.png"]),
+    ).toBe("scan.pdf");
+  });
+
+  it("matches an extensionless target to a PDF when no note exists", () => {
+    expect(resolveWikiLink("scan", ["Hello.md"], ["scan.pdf"])).toBe("scan.pdf");
+  });
+
+  it("prefers a note over an attachment with the same stem", () => {
+    expect(
+      resolveWikiLink("scan", ["scan.md"], ["scan.pdf"]),
+    ).toBe("scan.md");
+  });
 });
 
 describe("wikiCreatePath", () => {
@@ -89,6 +105,12 @@ describe("wikiCreatePath", () => {
 
   it("falls back to the project root when no file is open", () => {
     expect(wikiCreatePath("Note", "/vault", null)).toBe("/vault/Note.md");
+  });
+
+  it("keeps a non-note extension instead of appending .md", () => {
+    expect(wikiCreatePath("scan.pdf", "/vault", "/vault/Hello.md")).toBe(
+      "/vault/scan.pdf",
+    );
   });
 });
 
@@ -113,6 +135,14 @@ describe("outgoingWikiLinks", () => {
   it("leaves path undefined when the target does not resolve", () => {
     expect(outgoingWikiLinks("[[Missing]]", files)).toEqual([
       { target: "Missing", alias: undefined, path: undefined },
+    ]);
+  });
+
+  it("resolves a PDF against the asset list", () => {
+    expect(
+      outgoingWikiLinks("[[scan.pdf]]", files, ["scan.pdf"]),
+    ).toEqual([
+      { target: "scan.pdf", alias: undefined, path: "scan.pdf" },
     ]);
   });
 });

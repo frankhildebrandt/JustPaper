@@ -8,6 +8,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             project::list_project_files,
+            project::list_project_assets,
             project::search_project,
             project::read_project_notes,
         ])

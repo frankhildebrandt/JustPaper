@@ -102,4 +102,33 @@ describe("matchesAccelerator", () => {
       false,
     );
   });
+
+  it("matches CmdOrCtrl+Alt arrow shortcuts", () => {
+    expect(
+      matchesAccelerator(
+        keyEvent("ArrowLeft", {
+          metaKey: true,
+          altKey: true,
+          code: "ArrowLeft",
+        }),
+        "CmdOrCtrl+Alt+Left",
+      ),
+    ).toBe(true);
+    expect(
+      matchesAccelerator(
+        keyEvent("ArrowRight", {
+          ctrlKey: true,
+          altKey: true,
+          code: "ArrowRight",
+        }),
+        "CmdOrCtrl+Alt+Right",
+      ),
+    ).toBe(true);
+    expect(
+      matchesAccelerator(
+        keyEvent("ArrowLeft", { metaKey: true, code: "ArrowLeft" }),
+        "CmdOrCtrl+Alt+Left",
+      ),
+    ).toBe(false);
+  });
 });

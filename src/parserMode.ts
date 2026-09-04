@@ -95,6 +95,7 @@ export type ParserModeBinding = {
   offsetAtClientPoint: (clientX: number, clientY: number) => number | undefined;
   scrollElement: () => HTMLElement;
   onScroll: (listener: () => void) => () => void;
+  onWheel: (listener: () => void) => () => void;
   revealCaret: () => void;
   onChange: (listener: () => void) => () => void;
   onCaretOrDoc: (listener: () => void) => () => void;
@@ -324,6 +325,21 @@ export function bindParserMode(
       return () => {
         textarea.removeEventListener("scroll", listener);
         markdown.layoutElement.removeEventListener("scroll", listener);
+      };
+    },
+    onWheel: (listener: () => void): (() => void) => {
+      const capturing: AddEventListenerOptions = { capture: true };
+      textarea.addEventListener("wheel", listener, {
+        passive: true,
+        capture: true,
+      });
+      markdown.layoutElement.addEventListener("wheel", listener, {
+        passive: true,
+        capture: true,
+      });
+      return () => {
+        textarea.removeEventListener("wheel", listener, capturing);
+        markdown.layoutElement.removeEventListener("wheel", listener, capturing);
       };
     },
     revealCaret,

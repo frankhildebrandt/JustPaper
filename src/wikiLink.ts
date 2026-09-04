@@ -96,6 +96,7 @@ export function wikiLinksIn(source: string): WikiLink[] {
 export function outgoingWikiLinks(
   source: string,
   files: readonly string[],
+  assets: readonly string[] = [],
 ): OutgoingWikiLink[] {
   const seen = new Set<string>();
   const outgoing: OutgoingWikiLink[] = [];
@@ -108,7 +109,7 @@ export function outgoingWikiLinks(
     outgoing.push({
       target: link.target,
       alias: link.alias,
-      path: resolveWikiLink(link.target, files),
+      path: resolveWikiLink(link.target, files, assets),
     });
   }
   return outgoing;
@@ -149,18 +150,58 @@ function lineContaining(source: string, offset: number): string {
 }
 
 /**
+ * Returns whether `path` is a project note (markdown, text, or Typst).
+ */
+export function isNotePath(path: string): boolean {
+  return /\.(md|txt|typ)$/i.test(path);
+}
+
+/**
+ * Returns whether a wiki target names a non-note file such as a PDF.
+ */
+export function isWikiAssetTarget(target: string): boolean {
+  const base = basename(target);
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) {
+    return false;
+  }
+  return !isNotePath(base);
+}
+
+/**
  * Returns the project-relative path of an existing file for `target`.
+ * Notes win over attachments; `[[scan]]` matches `scan.pdf` only when no note exists.
  */
 export function resolveWikiLink(
   target: string,
   files: readonly string[],
+  assets: readonly string[] = [],
 ): string | undefined {
-  const needle = wikiStem(target).toLowerCase();
+  const note = matchWiki(target, files, wikiStem);
+  if (note !== undefined) {
+    return note;
+  }
+  const named = matchWiki(target, assets, wikiStem);
+  if (named !== undefined) {
+    return named;
+  }
+  if (isWikiAssetTarget(target)) {
+    return undefined;
+  }
+  return matchWiki(target, assets, stripExtension);
+}
+
+function matchWiki(
+  target: string,
+  files: readonly string[],
+  stem: (path: string) => string,
+): string | undefined {
+  const needle = stem(target).toLowerCase();
   if (needle.includes("/")) {
-    return files.find((file) => wikiStem(file).toLowerCase() === needle);
+    return files.find((file) => stem(file).toLowerCase() === needle);
   }
   const matches = files.filter(
-    (file) => wikiStem(basename(file)).toLowerCase() === needle,
+    (file) => stem(basename(file)).toLowerCase() === needle,
   );
   if (matches.length === 0) {
     return undefined;
@@ -189,11 +230,18 @@ export function wikiCreatePath(
 }
 
 function withMarkdownExtension(target: string): string {
-  return /\.(md|txt|typ)$/i.test(target) ? target : `${target}.md`;
+  if (isNotePath(target) || isWikiAssetTarget(target)) {
+    return target;
+  }
+  return `${target}.md`;
 }
 
 function wikiStem(path: string): string {
   return path.replace(/\.(md|txt|typ)$/i, "");
+}
+
+function stripExtension(path: string): string {
+  return path.replace(/\.[^./]+$/, "");
 }
 
 function basename(path: string): string {

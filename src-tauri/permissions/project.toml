@@ -4,6 +4,11 @@ description = "List markdown and text files in a project folder."
 commands.allow = ["list_project_files"]
 
 [[permission]]
+identifier = "allow-list-project-assets"
+description = "List non-note files such as PDFs in a project folder."
+commands.allow = ["list_project_assets"]
+
+[[permission]]
 identifier = "allow-search-project"
 description = "Search markdown and text file contents in a project folder."
 commands.allow = ["search_project"]

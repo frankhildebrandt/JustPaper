@@ -64,6 +64,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const highlight = bindHighlightMode(editor, requiredElement("highlight"), {
     applyHighlightMode: parser.applyHighlightMode,
     onCaretOrDoc: parser.onCaretOrDoc,
+    onWheel: parser.onWheel,
   });
   let syncLinkHelper = (): void => undefined;
   const settings = bindSettings(document.documentElement, {
@@ -387,27 +388,31 @@ window.addEventListener("DOMContentLoaded", () => {
       });
       return;
     }
-    void paperDoc.listFiles().then((files) => {
-      const links = outgoingWikiLinks(parser.getDocument(), files).map(
-        (link) => ({
+    void Promise.all([paperDoc.listFiles(), paperDoc.listAssets()]).then(
+      ([files, assets]) => {
+        const links = outgoingWikiLinks(
+          parser.getDocument(),
+          files,
+          assets,
+        ).map((link) => ({
           id: link.target,
           title: link.alias ?? link.target,
           detail: link.path,
-        }),
-      );
-      palette.open({
-        placeholder: "Links im Dokument",
-        load: (query) =>
-          filterByQuery(
-            links,
-            query,
-            (item) => `${item.title} ${item.detail ?? item.id}`,
-          ),
-        onPick: (item) => {
-          void paperDoc.followWiki(item.id);
-        },
-      });
-    });
+        }));
+        palette.open({
+          placeholder: "Links im Dokument",
+          load: (query) =>
+            filterByQuery(
+              links,
+              query,
+              (item) => `${item.title} ${item.detail ?? item.id}`,
+            ),
+          onPick: (item) => {
+            void paperDoc.followWiki(item.id);
+          },
+        });
+      },
+    );
   };
   const jumpIncoming = (): void => {
     const root = paperDoc.projectRoot();

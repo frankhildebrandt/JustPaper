@@ -4,6 +4,13 @@ export type HighlightMode = "none" | "paragraph" | "sentence" | "headline";
 
 export const DEFAULT_HIGHLIGHT_MODE: HighlightMode = "none";
 
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"]);
+
+export type HighlightGesture =
+  | { type: "wheel" }
+  | { type: "keydown"; key: string }
+  | { type: "click" };
+
 export type CheckedHighlightModeItems = {
   none: boolean;
   paragraph: boolean;
@@ -25,6 +32,34 @@ export function checkedHighlightModeItems(
   };
 }
 
+/**
+ * Returns whether highlight painting should stay off after a user gesture.
+ * Wheel suspends; a click or non-modifier key resumes.
+ */
+export function highlightSuspendedAfterGesture(
+  suspended: boolean,
+  gesture: HighlightGesture,
+): boolean {
+  switch (gesture.type) {
+    case "wheel":
+      return true;
+    case "click":
+      return false;
+    case "keydown":
+      return MODIFIER_KEYS.has(gesture.key) ? suspended : false;
+  }
+}
+
+/**
+ * Returns the mode to paint: `"none"` while temporarily suspended.
+ */
+export function highlightPaintMode(
+  mode: HighlightMode,
+  suspended: boolean,
+): HighlightMode {
+  return suspended && mode !== "none" ? "none" : mode;
+}
+
 export type HighlightModeBinding = {
   getHighlightMode: () => HighlightMode;
   setHighlightMode: (mode: HighlightMode) => void;
@@ -34,6 +69,7 @@ export type HighlightModeBinding = {
 export type HighlightSurface = {
   applyHighlightMode: (mode: HighlightMode) => void;
   onCaretOrDoc: (listener: () => void) => () => void;
+  onWheel: (listener: () => void) => () => void;
 };
 
 /**
@@ -46,15 +82,38 @@ export function bindHighlightMode(
   surface?: HighlightSurface,
 ): HighlightModeBinding {
   let mode: HighlightMode = DEFAULT_HIGHLIGHT_MODE;
+  let suspended = false;
+
+  const painted = (): HighlightMode => highlightPaintMode(mode, suspended);
 
   const paint = (): void => {
-    paintHighlightOverlay(textarea, overlay, mode);
+    paintHighlightOverlay(textarea, overlay, painted());
+  };
+
+  const applyPainted = (): void => {
+    surface?.applyHighlightMode(painted());
+    paint();
+  };
+
+  const applyGesture = (gesture: HighlightGesture): void => {
+    if (mode === "none") {
+      return;
+    }
+    const next = highlightSuspendedAfterGesture(suspended, gesture);
+    if (next === suspended) {
+      if (gesture.type !== "wheel") {
+        paint();
+      }
+      return;
+    }
+    suspended = next;
+    applyPainted();
   };
 
   const setHighlightMode = (next: HighlightMode): void => {
     mode = next;
-    surface?.applyHighlightMode(next);
-    paint();
+    suspended = false;
+    applyPainted();
   };
 
   const onHighlightEvent = (event: Event): void => {
@@ -71,13 +130,30 @@ export function bindHighlightMode(
     paint();
   };
 
+  const onWheel = (): void => {
+    applyGesture({ type: "wheel" });
+  };
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    applyGesture({ type: "keydown", key: event.key });
+  };
+
+  const onClick = (): void => {
+    applyGesture({ type: "click" });
+    onCaretMoved();
+  };
+
   textarea.addEventListener("input", paint);
-  textarea.addEventListener("click", onCaretMoved);
+  textarea.addEventListener("click", onClick);
   textarea.addEventListener("keyup", onCaretMoved);
   textarea.addEventListener("scroll", paint);
   document.addEventListener("selectionchange", onCaretMoved);
+  document.addEventListener("keydown", onKeyDown, true);
+  document.addEventListener("click", onClick, true);
   overlay.addEventListener("justpaper-highlight-mode", onHighlightEvent);
   const stopDoc = surface?.onCaretOrDoc(paint);
+  const stopWheel = surface?.onWheel(onWheel);
+  textarea.addEventListener("wheel", onWheel, { passive: true, capture: true });
   const observer = new ResizeObserver(paint);
   observer.observe(textarea);
   const hiddenObserver = new MutationObserver(paint);
@@ -91,12 +167,16 @@ export function bindHighlightMode(
       observer.disconnect();
       hiddenObserver.disconnect();
       textarea.removeEventListener("input", paint);
-      textarea.removeEventListener("click", onCaretMoved);
+      textarea.removeEventListener("click", onClick);
       textarea.removeEventListener("keyup", onCaretMoved);
       textarea.removeEventListener("scroll", paint);
+      textarea.removeEventListener("wheel", onWheel, true);
       document.removeEventListener("selectionchange", onCaretMoved);
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("click", onClick, true);
       overlay.removeEventListener("justpaper-highlight-mode", onHighlightEvent);
       stopDoc?.();
+      stopWheel?.();
     },
   };
 }

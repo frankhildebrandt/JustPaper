@@ -26,6 +26,16 @@ export async function listProjectFiles(root: string): Promise<string[]> {
 }
 
 /**
+ * Lists project-relative non-note files under `root`, such as PDFs.
+ */
+export async function listProjectAssets(root: string): Promise<string[]> {
+  if (!isTauriRuntime()) {
+    return [];
+  }
+  return invoke<string[]>("list_project_assets", { root });
+}
+
+/**
  * Searches file contents under `root` and returns line hits.
  */
 export async function searchProject(

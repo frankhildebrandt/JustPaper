@@ -22,6 +22,7 @@
     "fs:allow-watch",
     "fs:allow-unwatch",
     "allow-list-project-files",
+    "allow-list-project-assets",
     "allow-search-project",
     "allow-read-project-notes",
     {
@@ -30,6 +31,10 @@
         { "url": "https://*" },
         { "url": "http://*" }
       ]
+    },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$HOME/**" }]
     },
     {
       "identifier": "fs:scope",

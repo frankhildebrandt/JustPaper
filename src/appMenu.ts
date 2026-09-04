@@ -123,6 +123,10 @@ export function matchesAccelerator(
   if (event.key.toUpperCase() === expected) {
     return true;
   }
+  const arrow = arrowKey(expected);
+  if (arrow !== undefined && event.key.toUpperCase() === arrow) {
+    return true;
+  }
   if (/^\d$/.test(expected)) {
     return event.code === `Digit${expected}` || event.code === `Numpad${expected}`;
   }
@@ -130,6 +134,21 @@ export function matchesAccelerator(
     return event.code === `Key${expected}`;
   }
   return false;
+}
+
+function arrowKey(expected: string): string | undefined {
+  switch (expected) {
+    case "LEFT":
+      return "ARROWLEFT";
+    case "RIGHT":
+      return "ARROWRIGHT";
+    case "UP":
+      return "ARROWUP";
+    case "DOWN":
+      return "ARROWDOWN";
+    default:
+      return undefined;
+  }
 }
 
 function rememberShortcut(
@@ -213,6 +232,12 @@ async function fileMenuItems(
   const lastOpenedAction = (): void => {
     project.lastOpened();
   };
+  const goBackAction = (): void => {
+    void paperDoc.goBack();
+  };
+  const goForwardAction = (): void => {
+    void paperDoc.goForward();
+  };
 
   rememberShortcut(shortcuts, "CmdOrCtrl+N", newAction);
   rememberShortcut(shortcuts, "CmdOrCtrl+O", openAction);
@@ -234,6 +259,8 @@ async function fileMenuItems(
     () => inProject,
   );
   rememberShortcut(shortcuts, "CmdOrCtrl+E", lastOpenedAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+Alt+Left", goBackAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+Alt+Right", goForwardAction);
 
   return [
     await MenuItem.new({
@@ -305,6 +332,18 @@ async function fileMenuItems(
       text: "Zuletzt geöffnet",
       accelerator: "CmdOrCtrl+E",
       action: lastOpenedAction,
+    }),
+    await MenuItem.new({
+      id: "file-go-back",
+      text: "Zurück",
+      accelerator: "CmdOrCtrl+Alt+Left",
+      action: goBackAction,
+    }),
+    await MenuItem.new({
+      id: "file-go-forward",
+      text: "Vorwärts",
+      accelerator: "CmdOrCtrl+Alt+Right",
+      action: goForwardAction,
     }),
     await PredefinedMenuItem.new({ item: "Separator" }),
     ...recentItems,
