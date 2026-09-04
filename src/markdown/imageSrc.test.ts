@@ -25,6 +25,12 @@ describe("resolveImageSrc", () => {
     expect(resolveImageSrc("../img/a.png", "/Users/frank/Notes/sub")).toBe(
       "/Users/frank/Notes/img/a.png",
     );
+    expect(resolveImageSrc("..\\img\\a.png", "C:\\Notes\\sub")).toBe(
+      "C:/Notes/img/a.png",
+    );
+    expect(resolveImageSrc("pic.png", "\\\\server\\share\\notes")).toBe(
+      "//server/share/notes/pic.png",
+    );
   });
 
   it("rejects javascript URLs, empty hrefs, and relative paths without a base", () => {
@@ -38,5 +44,11 @@ describe("documentDir", () => {
   it("returns the parent folder of a saved note", () => {
     expect(documentDir("/Users/frank/Notes/hi.md")).toBe("/Users/frank/Notes");
     expect(documentDir(null)).toBeNull();
+    expect(documentDir("C:\\Users\\frank\\Notes\\hi.md")).toBe(
+      "C:/Users/frank/Notes",
+    );
+    expect(documentDir("\\\\server\\share\\notes\\hi.md")).toBe(
+      "//server/share/notes",
+    );
   });
 });

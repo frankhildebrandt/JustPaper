@@ -72,6 +72,11 @@ describe("parseRecentFiles", () => {
     expect(parseRecentFiles("not-json")).toEqual([]);
     expect(parseRecentFiles('{"path":"/a.md"}')).toEqual([]);
   });
+
+  it("caps stored paths to the recent-files limit", () => {
+    const stored = Array.from({ length: 20 }, (_, index) => `/${index}.md`);
+    expect(parseRecentFiles(JSON.stringify(stored))).toEqual(stored.slice(0, 9));
+  });
 });
 
 describe("serializeRecentFiles", () => {
@@ -96,6 +101,15 @@ describe("recentFileLabels", () => {
       recentFileLabels([
         "/Users/frank/Projects/notes.md",
         "/Users/frank/Documents/notes.md",
+      ]),
+    ).toEqual(["notes.md — Projects", "notes.md — Documents"]);
+  });
+
+  it("labels Windows paths by file and parent folder", () => {
+    expect(
+      recentFileLabels([
+        "C:\\Users\\frank\\Projects\\notes.md",
+        "C:\\Users\\frank\\Documents\\notes.md",
       ]),
     ).toEqual(["notes.md — Projects", "notes.md — Documents"]);
   });

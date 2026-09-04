@@ -46,7 +46,7 @@ export function bindOpenFileWatch(
         return;
       }
       stop = unwatch;
-    });
+    }).catch(() => undefined);
   };
 
   return {

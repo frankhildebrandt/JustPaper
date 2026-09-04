@@ -70,7 +70,7 @@ export function bindProjectTagIndex(
             return;
           }
           cache.setFile(relative, content);
-        });
+        }).catch(() => undefined);
       }
     }).then((unlisten) => {
       if (my !== generation) {
@@ -78,7 +78,7 @@ export function bindProjectTagIndex(
         return;
       }
       stop = unlisten;
-    });
+    }).catch(() => undefined);
   };
 
   return {
@@ -104,12 +104,16 @@ function filterNotes(
 }
 
 function relativeFromRoot(root: string, path: string): string | undefined {
-  const prefix = `${root.replace(/\/+$/, "")}/`;
-  const normalized = path.replace(/\\/g, "/");
-  if (!normalized.startsWith(prefix)) {
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedPath = path.replace(/\\/g, "/");
+  const prefix = `${normalizedRoot}/`;
+  const caseInsensitive = /^[a-z]:\//i.test(normalizedRoot) || normalizedRoot.startsWith("//");
+  const candidate = caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath;
+  const boundary = caseInsensitive ? prefix.toLowerCase() : prefix;
+  if (!candidate.startsWith(boundary)) {
     return undefined;
   }
-  return normalized.slice(prefix.length);
+  return normalizedPath.slice(prefix.length);
 }
 
 function isNote(path: string): boolean {

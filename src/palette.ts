@@ -113,9 +113,20 @@ export function bindPalette(
     if (!session) {
       return;
     }
+    const current = session;
     const id = ++request;
-    const next = await session.load(queryInput.value);
-    if (id !== request || !session) {
+    let next: PaletteItem[];
+    try {
+      next = await current.load(queryInput.value);
+    } catch {
+      if (id === request && session === current) {
+        items = [];
+        active = 0;
+        render();
+      }
+      return;
+    }
+    if (id !== request || session !== current) {
       return;
     }
     items = next;

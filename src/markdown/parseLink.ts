@@ -26,13 +26,13 @@ export function parseInlineLink(
     return undefined;
   }
   const labelFrom = image ? from + 2 : from + 1;
-  const labelClose = source.indexOf("](", labelFrom);
-  if (labelClose === -1) {
+  const labelClose = findLabelClose(source, labelFrom);
+  if (labelClose === undefined) {
     return undefined;
   }
   const destFrom = labelClose + 2;
-  const destClose = source.indexOf(")", destFrom);
-  if (destClose === -1) {
+  const destClose = findDestinationClose(source, destFrom);
+  if (destClose === undefined) {
     return undefined;
   }
   const href = source.slice(destFrom, destClose).trim();
@@ -54,6 +54,39 @@ export function parseInlineLink(
     dest: { from: destFrom, to: destClose },
     alt: source.slice(labelFrom, labelClose),
   };
+}
+
+function findLabelClose(source: string, from: number): number | undefined {
+  for (let cursor = from; cursor < source.length; cursor += 1) {
+    if (source[cursor] === "[") {
+      return undefined;
+    }
+    if (source[cursor] === "]" && source[cursor + 1] === "(") {
+      return cursor;
+    }
+  }
+  return undefined;
+}
+
+function findDestinationClose(source: string, from: number): number | undefined {
+  let possibleNestedLabel = false;
+  for (let cursor = from; cursor < source.length; cursor += 1) {
+    if (source[cursor] === "[") {
+      possibleNestedLabel = true;
+      continue;
+    }
+    if (
+      possibleNestedLabel &&
+      source[cursor] === "]" &&
+      source[cursor + 1] === "("
+    ) {
+      return undefined;
+    }
+    if (source[cursor] === ")") {
+      return cursor;
+    }
+  }
+  return undefined;
 }
 
 function isHttpUrl(href: string): boolean {

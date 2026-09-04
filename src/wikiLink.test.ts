@@ -6,6 +6,7 @@ import {
   resolveWikiLink,
   wikiCreatePath,
   wikiLinkAt,
+  wikiLinksIn,
 } from "./wikiLink";
 
 describe("parseWikiLink", () => {
@@ -30,6 +31,20 @@ describe("parseWikiLink", () => {
   it("rejects an unclosed link", () => {
     expect(parseWikiLink("[[Note", 0)).toBeUndefined();
   });
+
+  it("does not rescan nested openers as one malformed link", () => {
+    expect(parseWikiLink("[[broken [[valid]]", 0)).toBeUndefined();
+    expect(wikiLinksIn("[[broken [[valid]]")).toEqual([
+      { target: "valid", alias: undefined, from: 9, to: 18 },
+    ]);
+  });
+
+  it("handles long runs of unmatched openers", () => {
+    const source = "[[".repeat(500_000);
+    const started = performance.now();
+    expect(wikiLinksIn(source)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 describe("wikiLinkAt", () => {
@@ -51,6 +66,7 @@ describe("resolveWikiLink", () => {
 
   it("matches a path relative to the project root", () => {
     expect(resolveWikiLink("folder/Note", files)).toBe("folder/Note.md");
+    expect(resolveWikiLink("folder\\Note", files)).toBe("folder/Note.md");
   });
 
   it("picks the shortest path when several basenames match", () => {
@@ -107,10 +123,34 @@ describe("wikiCreatePath", () => {
     expect(wikiCreatePath("Note", "/vault", null)).toBe("/vault/Note.md");
   });
 
+  it("falls back to the project root when the open file is elsewhere", () => {
+    expect(wikiCreatePath("Note", "/vault", "/outside/Hello.md")).toBe(
+      "/vault/Note.md",
+    );
+  });
+
   it("keeps a non-note extension instead of appending .md", () => {
     expect(wikiCreatePath("scan.pdf", "/vault", "/vault/Hello.md")).toBe(
       "/vault/scan.pdf",
     );
+  });
+
+  it("normalizes safe dot segments inside the project", () => {
+    expect(wikiCreatePath("folder/../Note", "/vault", "/vault/Hello.md")).toBe(
+      "/vault/Note.md",
+    );
+    expect(wikiCreatePath("folder\\Note", "C:\\vault", "C:\\vault\\Hello.md")).toBe(
+      "C:/vault/folder/Note.md",
+    );
+  });
+
+  it("rejects traversal and absolute targets", () => {
+    expect(wikiCreatePath("../outside", "/vault", "/vault/Hello.md")).toBeUndefined();
+    expect(wikiCreatePath("..\\outside", "/vault", "/vault/Hello.md")).toBeUndefined();
+    expect(wikiCreatePath("folder/../../outside", "/vault", null)).toBeUndefined();
+    expect(wikiCreatePath("/outside", "/vault", null)).toBeUndefined();
+    expect(wikiCreatePath("C:\\outside", "C:\\vault", null)).toBeUndefined();
+    expect(wikiCreatePath("C:outside", "C:\\vault", null)).toBeUndefined();
   });
 });
 

@@ -5,7 +5,7 @@ export function documentDir(path: string | null): string | null {
   if (path === null) {
     return null;
   }
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const slash = trimmed.lastIndexOf("/");
   if (slash <= 0) {
     return slash === 0 ? "/" : null;
@@ -26,24 +26,25 @@ export function resolveImageSrc(
   if (trimmed.length === 0) {
     return undefined;
   }
-  const lower = trimmed.toLowerCase();
+  const normalized = trimmed.replace(/\\/g, "/");
+  const lower = normalized.toLowerCase();
   if (lower.startsWith("javascript:") || lower.startsWith("file:")) {
     return undefined;
   }
   if (lower.startsWith("https://") || lower.startsWith("http://")) {
-    return allowExternal ? trimmed : undefined;
+    return allowExternal ? normalized : undefined;
   }
-  if (trimmed.startsWith("/")) {
-    return normalizePath(trimmed);
+  if (normalized.startsWith("/") || /^[a-z]:/i.test(normalized)) {
+    return normalizePath(normalized);
   }
   if (baseDir === null || baseDir.length === 0) {
     return undefined;
   }
-  return joinPath(baseDir, trimmed);
+  return joinPath(baseDir.replace(/\\/g, "/"), normalized);
 }
 
 function joinPath(baseDir: string, relative: string): string {
-  const prefix = baseDir.startsWith("/") ? "/" : "";
+  const prefix = absolutePrefix(baseDir);
   const parts = [
     ...baseDir.split("/").filter((part) => part.length > 0),
     ...relative.split("/"),
@@ -52,8 +53,12 @@ function joinPath(baseDir: string, relative: string): string {
 }
 
 function normalizePath(path: string): string {
-  const prefix = path.startsWith("/") ? "/" : "";
+  const prefix = absolutePrefix(path);
   return prefix + normalizeParts(path.split("/")).join("/");
+}
+
+function absolutePrefix(path: string): string {
+  return path.startsWith("//") ? "//" : path.startsWith("/") ? "/" : "";
 }
 
 function normalizeParts(parts: string[]): string[] {

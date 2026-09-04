@@ -127,7 +127,11 @@ export function loadSettings(): AppSettings {
  * Writes settings to `localStorage`.
  */
 export function saveSettings(settings: AppSettings): void {
-  localStorage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(settings));
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(settings));
+  } catch {
+    // Settings persistence is best-effort in restricted/private WebViews.
+  }
 }
 
 /**

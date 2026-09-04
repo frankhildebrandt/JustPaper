@@ -124,7 +124,7 @@ export function applyRename(
 }
 
 function parentDir(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const slash = trimmed.lastIndexOf("/");
   if (slash <= 0) {
     return slash === 0 ? "/" : "";

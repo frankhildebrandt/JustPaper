@@ -1,10 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use ignore::WalkBuilder;
 use serde::Serialize;
 
 const SEARCH_LIMIT: usize = 200;
 const MAX_FILE_BYTES: usize = 1_000_000;
+const MAX_PROJECT_ENTRIES: usize = 50_000;
+const MAX_PROJECT_FILES: usize = 10_000;
+const MAX_PROJECT_PATH_BYTES: usize = 2_000_000;
+const MAX_PROJECT_BYTES: usize = 50_000_000;
 
 #[derive(Serialize)]
 pub struct SearchHit {
@@ -35,14 +43,39 @@ pub fn list_project_assets(root: String) -> Result<Vec<String>, String> {
     walk_project_files(&PathBuf::from(root), |path| !is_note(path))
 }
 
-fn walk_project_files(
+fn walk_project_files(root: &Path, keep: impl Fn(&Path) -> bool) -> Result<Vec<String>, String> {
+    walk_project_files_with_limits(
+        root,
+        keep,
+        MAX_PROJECT_ENTRIES,
+        MAX_PROJECT_FILES,
+        MAX_PROJECT_PATH_BYTES,
+    )
+}
+
+fn walk_project_files_with_limits(
     root: &Path,
     keep: impl Fn(&Path) -> bool,
+    max_entries: usize,
+    max_files: usize,
+    max_path_bytes: usize,
 ) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
+    let mut entries = 0usize;
+    let mut path_bytes = 0usize;
     for entry in WalkBuilder::new(root).standard_filters(true).build() {
+        entries += 1;
+        if entries > max_entries {
+            return Err(format!(
+                "project contains more than {max_entries} filesystem entries"
+            ));
+        }
         let entry = entry.map_err(|error| error.to_string())?;
-        if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+        if !entry
+            .file_type()
+            .map(|kind| kind.is_file())
+            .unwrap_or(false)
+        {
             continue;
         }
         let path = entry.path();
@@ -50,6 +83,17 @@ fn walk_project_files(
             continue;
         }
         if let Some(relative) = relative_path(root, path) {
+            if files.len() >= max_files {
+                return Err(format!(
+                    "project contains more than {max_files} matching files"
+                ));
+            }
+            account_bytes(
+                &mut path_bytes,
+                relative.len(),
+                max_path_bytes,
+                "project paths",
+            )?;
             files.push(relative);
         }
     }
@@ -69,17 +113,21 @@ pub fn search_project(root: String, query: String) -> Result<Vec<SearchHit>, Str
     let files = list_project_files(root.clone())?;
     let root = PathBuf::from(root);
     let mut hits = Vec::new();
+    let mut bytes_read = 0usize;
     for relative in files {
         if hits.len() >= SEARCH_LIMIT {
             break;
         }
         let absolute = root.join(&relative);
-        let Ok(content) = std::fs::read_to_string(&absolute) else {
+        let Ok(Some(content)) = read_text_file_bounded(&absolute, MAX_FILE_BYTES) else {
             continue;
         };
-        if content.len() > MAX_FILE_BYTES {
-            continue;
-        }
+        account_bytes(
+            &mut bytes_read,
+            content.len(),
+            MAX_PROJECT_BYTES,
+            "project search",
+        )?;
         for (index, line) in content.lines().enumerate() {
             if hits.len() >= SEARCH_LIMIT {
                 break;
@@ -104,14 +152,18 @@ pub fn read_project_notes(root: String) -> Result<Vec<ProjectNote>, String> {
     let files = list_project_files(root.clone())?;
     let root = PathBuf::from(root);
     let mut notes = Vec::new();
+    let mut bytes_read = 0usize;
     for relative in files {
         let absolute = root.join(&relative);
-        let Ok(content) = std::fs::read_to_string(&absolute) else {
+        let Ok(Some(content)) = read_text_file_bounded(&absolute, MAX_FILE_BYTES) else {
             continue;
         };
-        if content.len() > MAX_FILE_BYTES {
-            continue;
-        }
+        account_bytes(
+            &mut bytes_read,
+            content.len(),
+            MAX_PROJECT_BYTES,
+            "project notes",
+        )?;
         notes.push(ProjectNote {
             path: relative,
             content,
@@ -120,16 +172,41 @@ pub fn read_project_notes(root: String) -> Result<Vec<ProjectNote>, String> {
     Ok(notes)
 }
 
-fn is_note(path: &Path) -> bool {
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("md") | Some("txt") | Some("typ") => true,
-        _ => false,
+fn read_text_file_bounded(path: &Path, max_bytes: usize) -> Result<Option<String>, String> {
+    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.len() > max_bytes as u64 {
+        return Ok(None);
     }
+    let file = File::open(path).map_err(|error| error.to_string())?;
+    let mut content = String::new();
+    let mut bounded = file.take((max_bytes + 1) as u64);
+    if bounded.read_to_string(&mut content).is_err() || content.len() > max_bytes {
+        return Ok(None);
+    }
+    Ok(Some(content))
+}
+
+fn account_bytes(
+    total: &mut usize,
+    amount: usize,
+    max_bytes: usize,
+    operation: &str,
+) -> Result<(), String> {
+    *total = total
+        .checked_add(amount)
+        .filter(|next| *next <= max_bytes)
+        .ok_or_else(|| format!("{operation} exceeds {max_bytes} bytes"))?;
+    Ok(())
+}
+
+fn is_note(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .as_deref(),
+        Some("md") | Some("txt") | Some("typ")
+    )
 }
 
 fn relative_path(root: &Path, path: &Path) -> Option<String> {
@@ -181,8 +258,7 @@ mod tests {
     #[test]
     fn searches_case_insensitive_lines() {
         with_vault(|dir| {
-            let hits =
-                search_project(dir.to_string_lossy().into_owned(), "NEEDLE".into()).unwrap();
+            let hits = search_project(dir.to_string_lossy().into_owned(), "NEEDLE".into()).unwrap();
             assert_eq!(hits.len(), 1);
             assert_eq!(hits[0].path, "sub/Note.txt");
             assert_eq!(hits[0].line, 1);
@@ -213,5 +289,41 @@ mod tests {
                 vec!["binary.bin".to_string(), "scan.pdf".to_string()]
             );
         });
+    }
+
+    #[test]
+    fn rejects_projects_over_the_file_budget() {
+        with_vault(|dir| {
+            let error = walk_project_files_with_limits(dir, is_note, usize::MAX, 2, usize::MAX)
+                .unwrap_err();
+            assert!(error.contains("more than 2"));
+        });
+    }
+
+    #[test]
+    fn rejects_projects_over_the_entry_budget() {
+        with_vault(|dir| {
+            let error = walk_project_files_with_limits(dir, |_| false, 1, usize::MAX, usize::MAX)
+                .unwrap_err();
+            assert!(error.contains("more than 1 filesystem entries"));
+        });
+    }
+
+    #[test]
+    fn skips_a_note_larger_than_the_per_file_budget() {
+        with_vault(|dir| {
+            fs::write(dir.join("Huge.md"), vec![b'a'; MAX_FILE_BYTES + 1])
+                .expect("write oversized note");
+            let notes = read_project_notes(dir.to_string_lossy().into_owned()).unwrap();
+            assert!(!notes.iter().any(|note| note.path == "Huge.md"));
+        });
+    }
+
+    #[test]
+    fn rejects_aggregate_bytes_over_the_budget() {
+        let mut total = 4;
+        account_bytes(&mut total, 6, 10, "test").unwrap();
+        assert_eq!(total, 10);
+        assert!(account_bytes(&mut total, 1, 10, "test").is_err());
     }
 }

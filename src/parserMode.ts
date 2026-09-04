@@ -85,7 +85,7 @@ export type ParserModeBinding = {
   getParserMode: () => ParserMode;
   setParserMode: (mode: ParserMode) => void;
   getDocument: () => string;
-  setDocument: (text: string, caretLine?: number) => void;
+  setDocument: (text: string, caretLine?: number, resetUndo?: boolean) => void;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
   isSelectionEmpty: () => boolean;
@@ -234,13 +234,20 @@ export function bindParserMode(
   const getDocument = (): string =>
     mode === "plain" ? textarea.value : markdown.getDocument();
 
-  const setDocument = (text: string, caretLine?: number): void => {
-    textarea.value = text;
-    if (caretLine !== undefined) {
-      const caret = offsetAtLine(text, caretLine);
-      textarea.setSelectionRange(caret, caret);
+  const setDocument = (
+    text: string,
+    caretLine?: number,
+    resetUndo = false,
+  ): void => {
+    if (mode === "plain") {
+      textarea.value = text;
+      if (caretLine !== undefined) {
+        const caret = offsetAtLine(text, caretLine);
+        textarea.setSelectionRange(caret, caret);
+      }
+      return;
     }
-    markdown.setDocument(text, caretLine);
+    markdown.setDocument(text, caretLine, resetUndo);
   };
 
   const getCaretOffset = (): number =>

@@ -29,7 +29,9 @@ export function parseRecentFiles(raw: string | null): string[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter((entry) => typeof entry === "string");
+    return parsed
+      .filter((entry) => typeof entry === "string")
+      .slice(0, RECENT_FILES_LIMIT);
   } catch {
     return [];
   }
@@ -62,11 +64,11 @@ export function recentFileLabels(paths: string[]): string[] {
 }
 
 function fileName(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 
 function parentFolder(path: string): string | undefined {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[/\\]/).filter(Boolean);
   return parts.length >= 2 ? parts[parts.length - 2] : undefined;
 }

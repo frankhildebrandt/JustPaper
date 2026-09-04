@@ -8,10 +8,10 @@ export function displayName(path: string | null): string {
     return UNTITLED;
   }
   const name = basename(path);
-  if (name.endsWith(".md")) {
+  if (name.toLowerCase().endsWith(".md")) {
     return name.slice(0, -3);
   }
-  if (name.endsWith(".typ")) {
+  if (name.toLowerCase().endsWith(".typ")) {
     return name.slice(0, -4);
   }
   return name;
@@ -44,7 +44,7 @@ export function untitledCreatePath(
   if (next === undefined) {
     return undefined;
   }
-  const root = projectRoot.replace(/\/+$/, "");
+  const root = normalizePath(projectRoot).replace(/\/+$/, "");
   return `${root}/${next}`;
 }
 
@@ -86,7 +86,7 @@ function extensionOf(path: string): string {
 }
 
 function basename(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = normalizePath(path).split("/").filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 
@@ -94,10 +94,14 @@ function basename(path: string): string {
  * Returns the parent directory of a file path.
  */
 export function dirname(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = normalizePath(path).replace(/\/+$/, "");
   const slash = trimmed.lastIndexOf("/");
   if (slash <= 0) {
     return slash === 0 ? "/" : "";
   }
   return trimmed.slice(0, slash);
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/");
 }

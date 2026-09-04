@@ -19,6 +19,13 @@ describe("displayName", () => {
     expect(displayName("/vault/Paper.typ")).toBe("Paper");
   });
 
+  it("handles Windows paths and uppercase note extensions", () => {
+    expect(displayName("C:\\vault\\HELLO.MD")).toBe("HELLO");
+    expect(renamePath("C:\\vault\\Hello.md", "World")).toBe(
+      "C:/vault/World.md",
+    );
+  });
+
   it("keeps non-md extensions visible", () => {
     expect(displayName("/vault/notes.txt")).toBe("notes.txt");
   });
@@ -67,5 +74,9 @@ describe("dirname", () => {
 
   it("returns slash for a file at the root", () => {
     expect(dirname("/notes.md")).toBe("/");
+  });
+
+  it("normalizes a Windows parent path", () => {
+    expect(dirname("C:\\vault\\notes.md")).toBe("C:/vault");
   });
 });

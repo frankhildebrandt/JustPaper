@@ -64,6 +64,23 @@ describe("bindProjectTagIndex", () => {
     expect(index.tagsFor("Hello.md")).toEqual(["live"]);
   });
 
+  it("normalizes Windows watch paths relative to their project root", async () => {
+    let emit: ((paths: string[]) => void) | undefined;
+    const index = bindProjectTagIndex({
+      readNotes: async () => [],
+      readFile: async () => "---\ntags: [windows]\n---\n",
+      startWatch: async (_root, onEvent) => {
+        emit = onEvent;
+        return () => {};
+      },
+    });
+    index.follow("C:\\Vault");
+    await Promise.resolve();
+    emit?.(["c:\\vault\\Notes\\Hello.md"]);
+    await Promise.resolve();
+    expect(index.tagsFor("Notes/Hello.md")).toEqual(["windows"]);
+  });
+
   it("removes tags when the watched file is gone", async () => {
     let emit: ((paths: string[]) => void) | undefined;
     const index = bindProjectTagIndex({

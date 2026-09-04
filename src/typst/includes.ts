@@ -26,6 +26,13 @@ export type NoteContent = {
 
 const INCLUDE_PATH =
   /^#include\s*(?:\(\s*)?"([^"]+)"/;
+export const MAX_TYPST_PROJECT_FILES = 1_000;
+export const MAX_TYPST_PROJECT_CHARS = 25_000_000;
+
+export type TypstProjectLimits = {
+  maxFiles?: number;
+  maxChars?: number;
+};
 
 /**
  * Returns every `#include` path in Typst markup, in source order.
@@ -81,19 +88,30 @@ export function resolveTypstInclude(
 export async function collectTypstProjectFiles(
   mainRelative: string,
   readContent: (relativePath: string) => Promise<string | undefined>,
+  limits: TypstProjectLimits = {},
 ): Promise<string[]> {
   const files: string[] = [];
   const visited = new Set<string>();
+  const maxFiles = limits.maxFiles ?? MAX_TYPST_PROJECT_FILES;
+  const maxChars = limits.maxChars ?? MAX_TYPST_PROJECT_CHARS;
+  let charsRead = 0;
 
   const visit = async (relative: string): Promise<void> => {
     if (visited.has(relative)) {
       return;
+    }
+    if (files.length >= maxFiles) {
+      throw new Error(`Typst project contains more than ${maxFiles} files`);
     }
     visited.add(relative);
     files.push(relative);
     const content = await readContent(relative);
     if (content === undefined) {
       return;
+    }
+    charsRead += content.length;
+    if (charsRead > maxChars) {
+      throw new Error(`Typst project exceeds ${maxChars} characters`);
     }
     for (const include of typstIncludesIn(content)) {
       const resolved = resolveTypstInclude(relative, include.path);

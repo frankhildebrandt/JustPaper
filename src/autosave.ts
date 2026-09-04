@@ -2,7 +2,7 @@ export const AUTOSAVE_DELAY_MS = 800;
 
 export type Autosave = {
   schedule: () => void;
-  flush: () => void;
+  flush: () => Promise<void>;
   cancel: () => void;
 };
 
@@ -10,10 +10,11 @@ export type Autosave = {
  * Debounces `save` so it runs once after edits settle, with an explicit flush.
  */
 export function bindAutosave(
-  save: () => void,
+  save: () => void | Promise<void>,
   delayMs: number = AUTOSAVE_DELAY_MS,
 ): Autosave {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let active = Promise.resolve();
 
   const cancel = (): void => {
     if (timer === undefined) {
@@ -23,12 +24,17 @@ export function bindAutosave(
     timer = undefined;
   };
 
-  const flush = (): void => {
-    if (timer === undefined) {
-      return;
+  const run = (): Promise<void> => {
+    active = active.then(save).catch(() => undefined);
+    return active;
+  };
+
+  const flush = (): Promise<void> => {
+    if (timer !== undefined) {
+      cancel();
+      void run();
     }
-    cancel();
-    save();
+    return active;
   };
 
   return {
@@ -36,7 +42,7 @@ export function bindAutosave(
       cancel();
       timer = setTimeout(() => {
         timer = undefined;
-        save();
+        void run().catch(() => undefined);
       }, delayMs);
     },
     flush,

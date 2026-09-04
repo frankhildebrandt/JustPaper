@@ -30,10 +30,23 @@ describe("parseInlineLink", () => {
     });
   });
 
+  it("preserves brackets in destinations", () => {
+    expect(parseInlineLink("[docs](http://[::1]/x)", 0)?.href).toBe(
+      "http://[::1]/x",
+    );
+    expect(parseInlineLink("![alt](foo[1].png)", 0)?.href).toBe("foo[1].png");
+  });
+
   it("rejects a missing destination or a non-http scheme for links", () => {
     expect(parseInlineLink("[docs]()", 0)).toBeUndefined();
     expect(parseInlineLink("[docs](javascript:alert(1))", 0)).toBeUndefined();
     expect(parseInlineLink("plain", 0)).toBeUndefined();
+  });
+
+  it("rejects a nested opener before a closing label", () => {
+    expect(
+      parseInlineLink("[broken [docs](https://example.com)", 0),
+    ).toBeUndefined();
   });
 });
 
@@ -42,5 +55,12 @@ describe("externalLinkAt", () => {
     const source = "see [docs](https://example.com) please";
     expect(externalLinkAt(source, 6)?.href).toBe("https://example.com");
     expect(externalLinkAt(source, 0)).toBeUndefined();
+  });
+
+  it("handles long runs of unmatched openers", () => {
+    const source = "[a".repeat(500_000);
+    const started = performance.now();
+    expect(externalLinkAt(source, 0)).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });

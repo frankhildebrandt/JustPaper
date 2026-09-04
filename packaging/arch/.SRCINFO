@@ -1,6 +1,6 @@
 pkgbase = justpaper
 	pkgdesc = A frameless typewriter on a sheet of paper
-	pkgver = 0.1.1
+	pkgver = 0.3.1
 	pkgrel = 1
 	url = https://github.com/frankhildebrandt/JustPaper
 	arch = x86_64
@@ -14,9 +14,9 @@ pkgbase = justpaper
 	depends = gtk3
 	depends = libayatana-appindicator
 	depends = librsvg
-	source = justpaper-0.1.1.tar.gz::https://github.com/frankhildebrandt/JustPaper/archive/refs/tags/v0.1.1.tar.gz
+	source = justpaper-0.3.1.tar.gz::https://github.com/frankhildebrandt/JustPaper/archive/refs/tags/v0.3.1.tar.gz
 	source = justpaper.desktop
-	sha256sums = SKIP
-	sha256sums = SKIP
+	sha256sums = 7d470595437cebadea044a90196d49549adecdc13d63b8837a356268b1ecb9dd
+	sha256sums = b0e08326f9e76da7b00e3c4942aa895de5bbfc6091cd231edf4f1b3470a9f24c
 
 pkgname = justpaper

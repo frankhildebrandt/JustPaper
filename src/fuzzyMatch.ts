@@ -129,6 +129,6 @@ function isSubsequence(haystack: string, needle: string): boolean {
 }
 
 function basename(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }

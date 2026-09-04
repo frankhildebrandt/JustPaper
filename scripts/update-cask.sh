@@ -56,13 +56,15 @@ curl -fsSL "https://github.com/${repo}/archive/refs/tags/v${version}.tar.gz" -o 
 src_sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
 desktop_sha="$(shasum -a 256 "$root/packaging/arch/justpaper.desktop" | awk '{print $1}')"
 
-python3 - "$root/packaging/arch/PKGBUILD" "$version" "$src_sha" "$desktop_sha" <<'PY'
+python3 - "$root/packaging/arch/PKGBUILD" "$root/packaging/arch/.SRCINFO" "$version" "$src_sha" "$desktop_sha" "$repo" <<'PY'
 import re
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-version, src_sha, desktop_sha = sys.argv[2], sys.argv[3], sys.argv[4]
+srcinfo_path = Path(sys.argv[2])
+version, src_sha, desktop_sha = sys.argv[3], sys.argv[4], sys.argv[5]
+repo = sys.argv[6]
 text = path.read_text()
 text = re.sub(r"^pkgver=.*$", f"pkgver={version}", text, count=1, flags=re.M)
 text = re.sub(
@@ -73,6 +75,24 @@ text = re.sub(
     flags=re.M,
 )
 path.write_text(text)
+
+srcinfo = srcinfo_path.read_text()
+srcinfo = re.sub(r"^\tpkgver = .*$", f"\tpkgver = {version}", srcinfo, count=1, flags=re.M)
+srcinfo = re.sub(
+    r"^\tsource = justpaper-.*?\.tar\.gz::.*$",
+    f"\tsource = justpaper-{version}.tar.gz::https://github.com/{repo}/archive/refs/tags/v{version}.tar.gz",
+    srcinfo,
+    count=1,
+    flags=re.M,
+)
+srcinfo = re.sub(
+    r"^\tsha256sums = .*\n\tsha256sums = .*$",
+    f"\tsha256sums = {src_sha}\n\tsha256sums = {desktop_sha}",
+    srcinfo,
+    count=1,
+    flags=re.M,
+)
+srcinfo_path.write_text(srcinfo)
 PY
 
-echo "updated cask and PKGBUILD for v${version}"
+echo "updated cask, PKGBUILD, and .SRCINFO for v${version}"

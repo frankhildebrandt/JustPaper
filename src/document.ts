@@ -1,8 +1,9 @@
 import { message, open, save } from "@tauri-apps/plugin-dialog";
 import {
   exists,
+  lstat,
   mkdir,
-  readTextFile,
+  open as openFsFile,
   rename,
   watch,
   writeTextFile,
@@ -61,6 +62,7 @@ import { searchLines } from "./searchLines";
 import {
   appendTypstInclude,
   collectTypstProjectFiles,
+  MAX_TYPST_PROJECT_CHARS,
   resolveTypstInclude,
 } from "./typst/includes";
 import {
@@ -90,12 +92,15 @@ const FILE_FILTERS = [
 const TYPST_FILTERS = [{ name: "Typst", extensions: ["typ"] }];
 const DOCUMENT_START_LINE = 1;
 const SEARCH_LIMIT = 200;
+export const MAX_DOCUMENT_BYTES = 5_000_000;
+
+class DocumentTooLargeError extends Error {}
 
 export type { SearchHit, ProjectNote };
 
 export type DocumentContent = {
   getText: () => string;
-  setText: (text: string, caretLine?: number) => void;
+  setText: (text: string, caretLine?: number, resetUndo?: boolean) => void;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
   revealCaret: () => void;
@@ -153,40 +158,139 @@ function loadRecents(): string[] {
 }
 
 function persistRecents(session: DocumentSession): void {
-  localStorage.setItem(
-    RECENT_STORAGE_KEY,
-    serializeRecentFiles(session.recents),
-  );
+  try {
+    localStorage.setItem(
+      RECENT_STORAGE_KEY,
+      serializeRecentFiles(session.recents),
+    );
+  } catch {
+    // Persistence is best-effort; a storage quota must not break file I/O.
+  }
 }
 
 function fileName(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[/\\]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
 
 function isUnderRoot(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root.replace(/\/+$/, "")}/`);
+  const normalizedPath = normalizeFsPath(path);
+  const normalizedRoot = normalizeFsPath(root).replace(/\/+$/, "");
+  const caseInsensitive = /^[a-z]:(?:\/|$)/i.test(normalizedRoot);
+  const candidate = caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath;
+  const boundary = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
+  return candidate === boundary || candidate.startsWith(`${boundary}/`);
 }
 
 function joinRoot(root: string, relative: string): string {
-  return `${root.replace(/\/+$/, "")}/${relative.replace(/^\/+/, "")}`;
+  return `${normalizeFsPath(root).replace(/\/+$/, "")}/${normalizeFsPath(relative).replace(/^\/+/, "")}`;
 }
 
 function relativeFromRoot(root: string, path: string): string | undefined {
-  const prefix = `${root.replace(/\/+$/, "")}/`;
-  if (!path.startsWith(prefix)) {
+  const normalizedRoot = normalizeFsPath(root).replace(/\/+$/, "");
+  const normalizedPath = normalizeFsPath(path);
+  const prefix = `${normalizedRoot}/`;
+  const caseInsensitive = /^[a-z]:(?:\/|$)/i.test(normalizedRoot);
+  if (
+    !(caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath).startsWith(
+      caseInsensitive ? prefix.toLowerCase() : prefix,
+    )
+  ) {
     return undefined;
   }
-  return path.slice(prefix.length);
+  return normalizedPath.slice(prefix.length);
 }
 
 function parentDir(path: string): string | undefined {
-  const trimmed = path.replace(/\/+$/, "");
+  const trimmed = normalizeFsPath(path).replace(/\/+$/, "");
   const slash = trimmed.lastIndexOf("/");
   if (slash <= 0) {
     return undefined;
   }
   return trimmed.slice(0, slash);
+}
+
+function normalizeFsPath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+function isSafeProjectRelative(path: string): boolean {
+  const normalized = normalizeFsPath(path);
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith("/") ||
+    /^[a-z]:/i.test(normalized)
+  ) {
+    return false;
+  }
+  let depth = 0;
+  for (const part of normalized.split("/")) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      depth -= 1;
+      if (depth < 0) {
+        return false;
+      }
+      continue;
+    }
+    depth += 1;
+  }
+  return depth > 0;
+}
+
+async function readDocumentText(path: string): Promise<string> {
+  const file = await openFsFile(path, { read: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const chunks: string[] = [];
+  let bytesRead = 0;
+  try {
+    while (true) {
+      const remaining = MAX_DOCUMENT_BYTES - bytesRead;
+      const buffer = new Uint8Array(Math.min(64 * 1024, remaining + 1));
+      const count = await file.read(buffer);
+      if (count === null) {
+        chunks.push(decoder.decode());
+        return chunks.join("");
+      }
+      bytesRead += count;
+      if (bytesRead > MAX_DOCUMENT_BYTES) {
+        throw new DocumentTooLargeError();
+      }
+      chunks.push(decoder.decode(buffer.subarray(0, count), { stream: true }));
+    }
+  } finally {
+    await file.close();
+  }
+}
+
+async function isContainedDestination(
+  root: string,
+  destination: string,
+): Promise<boolean> {
+  const relative = relativeFromRoot(root, destination);
+  if (relative === undefined || !isSafeProjectRelative(relative)) {
+    return false;
+  }
+  try {
+    let current = normalizeFsPath(root).replace(/\/+$/, "");
+    for (const part of normalizeFsPath(relative).split("/")) {
+      if (part === "" || part === ".") {
+        continue;
+      }
+      current = `${current}/${part}`;
+      if (!(await exists(current))) {
+        break;
+      }
+      if ((await lstat(current)).isSymlink) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -204,6 +308,8 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   let carets = stored?.carets ?? {};
   let history = createFileHistory();
   let navigatingHistory = false;
+  let documentGeneration = 0;
+  let writeQueue = Promise.resolve();
   if (stored?.typstMain) {
     session = applyOpenTypstDocument(session, stored.typstMain);
   } else if (stored?.root) {
@@ -224,15 +330,19 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       keep.push(session.path);
     }
     carets = pruneCarets(carets, keep);
-    localStorage.setItem(
-      PROJECT_STORAGE_KEY,
-      serializeStoredSession({
-        root: session.projectRoot,
-        lastFile: session.path,
-        carets,
-        typstMain: session.typstMain,
-      }),
-    );
+    try {
+      localStorage.setItem(
+        PROJECT_STORAGE_KEY,
+        serializeStoredSession({
+          root: session.projectRoot,
+          lastFile: session.path,
+          carets,
+          typstMain: session.typstMain,
+        }),
+      );
+    } catch {
+      // Persistence is best-effort; saving the document itself remains primary.
+    }
   };
 
   const notify = (previous: DocumentSession): void => {
@@ -292,18 +402,32 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return choice === DISCARD_BUTTON;
   };
 
-  const writeTo = async (path: string): Promise<boolean> => {
+  const writeTo = (path: string): Promise<boolean> => {
     const text = content.getText();
-    try {
-      await writeTextFile(path, text);
-    } catch {
-      await showError(`“${fileName(path)}” could not be saved.`);
-      return false;
-    }
-    const previous = session;
-    session = applySave(session, path, text);
-    notify(previous);
-    return true;
+    const sourcePath = session.path;
+    const sourceGeneration = documentGeneration;
+    const queued = writeQueue.then(async (): Promise<boolean> => {
+      try {
+        await writeTextFile(path, text);
+      } catch {
+        await showError(`“${fileName(path)}” could not be saved.`);
+        return false;
+      }
+      if (
+        session.path === sourcePath &&
+        documentGeneration === sourceGeneration
+      ) {
+        const previous = session;
+        session = applySave(session, path, text);
+        notify(previous);
+      }
+      return true;
+    });
+    writeQueue = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queued;
   };
 
   const saveAsDocument = async (defaultPath?: string): Promise<boolean> => {
@@ -327,14 +451,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return writeTo(session.path);
   };
 
-  const autosave = bindAutosave(() => {
+  const autosave = bindAutosave(async () => {
     if (session.projectRoot === null || session.path === null) {
       return;
     }
     if (!isDirty(session, content.getText())) {
       return;
     }
-    void writeTo(session.path);
+    await writeTo(session.path);
   }, AUTOSAVE_DELAY_MS);
 
   /**
@@ -350,7 +474,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     const path = session.path;
     let disk: string;
     try {
-      disk = await readTextFile(path);
+      disk = await readDocumentText(path);
     } catch {
       return;
     }
@@ -364,7 +488,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     const previous = session;
     session = applyOpen(session, path, disk);
     applying = true;
-    content.setText(disk);
+    content.setText(disk, undefined, true);
     content.setCaretOffset(clampCaretOffset(caret, disk.length));
     applying = false;
     notify(previous);
@@ -409,18 +533,25 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   ): Promise<boolean> => {
     let text: string;
     try {
-      text = await readTextFile(path);
-    } catch {
-      const previous = session;
-      session = applyForgetRecent(session, path);
-      notify(previous);
-      await showError(`“${fileName(path)}” could not be opened.`);
+      text = await readDocumentText(path);
+    } catch (error) {
+      if (!(error instanceof DocumentTooLargeError)) {
+        const previous = session;
+        session = applyForgetRecent(session, path);
+        notify(previous);
+      }
+      const reason =
+        error instanceof DocumentTooLargeError
+          ? `“${fileName(path)}” is larger than 5 MB.`
+          : `“${fileName(path)}” could not be opened.`;
+      await showError(reason);
       return false;
     }
     const previous = session;
+    documentGeneration += 1;
     session = applyOpen(session, path, text);
     applying = true;
-    content.setText(text, caretLine);
+    content.setText(text, caretLine, true);
     if (caretLine === undefined) {
       content.setCaretOffset(
         clampCaretOffset(caretFor(carets, path), text.length),
@@ -438,7 +569,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     path: string,
     caretLine?: number,
   ): Promise<boolean> => {
-    autosave.flush();
+    await autosave.flush();
     if (session.path === path) {
       if (caretLine !== undefined) {
         content.setText(content.getText(), caretLine);
@@ -483,14 +614,15 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   };
 
   const newDocument = async (): Promise<void> => {
-    autosave.flush();
+    await autosave.flush();
     if (!(await confirmProceed())) {
       return;
     }
     const previous = session;
+    documentGeneration += 1;
     session = applyNew(session);
     applying = true;
-    content.setText("");
+    content.setText("", undefined, true);
     applying = false;
     rememberVisit(previous.path, null);
     notify(previous);
@@ -498,7 +630,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   };
 
   const openDocument = async (): Promise<void> => {
-    autosave.flush();
+    await autosave.flush();
     if (!(await confirmProceed())) {
       return;
     }
@@ -523,20 +655,22 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     const root = await open({
       multiple: false,
       directory: true,
+      recursive: true,
     });
     if (typeof root !== "string") {
       return;
     }
-    autosave.flush();
+    await autosave.flush();
     if (!(await confirmProceed())) {
       return;
     }
     const previous = session;
     session = applyOpenFolder(session, root);
     if (session.path !== null && !isUnderRoot(session.path, root)) {
+      documentGeneration += 1;
       session = applyNew(session);
       applying = true;
-      content.setText("");
+      content.setText("", undefined, true);
       applying = false;
       rememberVisit(previous.path, null);
     }
@@ -556,7 +690,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (typeof path !== "string") {
       return;
     }
-    autosave.flush();
+    await autosave.flush();
     if (!(await confirmProceed())) {
       return;
     }
@@ -611,7 +745,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       await showError(`“${fileName(dest)}” already exists.`);
       return false;
     }
-    autosave.flush();
+    await autosave.flush();
     try {
       await rename(session.path, dest);
     } catch {
@@ -636,7 +770,15 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.projectRoot === null) {
       return;
     }
+    if (!isSafeProjectRelative(relativePath)) {
+      await showError("The selected file is outside the project.");
+      return;
+    }
     const dest = joinRoot(session.projectRoot, relativePath);
+    if (!(await isContainedDestination(session.projectRoot, dest))) {
+      await showError("The selected file is outside the project.");
+      return;
+    }
     if (session.typstMain !== null && !(await exists(dest))) {
       if (!(await ensureEmptyFile(dest))) {
         return;
@@ -652,11 +794,17 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       return undefined;
     }
     const abs = joinRoot(session.projectRoot, relative);
+    if (
+      !isSafeProjectRelative(relative) ||
+      !(await isContainedDestination(session.projectRoot, abs))
+    ) {
+      return undefined;
+    }
     if (session.path === abs) {
       return content.getText();
     }
     try {
-      return await readTextFile(abs);
+      return await readDocumentText(abs);
     } catch {
       return undefined;
     }
@@ -708,7 +856,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     let text: string;
     try {
-      text = await readTextFile(main);
+      text = await readDocumentText(main);
     } catch {
       return;
     }
@@ -747,9 +895,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.typstMain !== null) {
       const files = await listTypstGraph();
       const notes: ProjectNote[] = [];
+      let charsRead = 0;
       for (const relative of files) {
         const note = await readRelativeNote(relative);
         if (note !== undefined) {
+          charsRead += note.length;
+          if (charsRead > MAX_TYPST_PROJECT_CHARS) {
+            throw new Error("Typst project exceeds the content budget");
+          }
           notes.push({ path: relative, content: note });
         }
       }
@@ -765,6 +918,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.typstMain !== null) {
       const files = await listTypstGraph();
       const hits: SearchHit[] = [];
+      let charsRead = 0;
       for (const relative of files) {
         if (hits.length >= SEARCH_LIMIT) {
           break;
@@ -772,6 +926,10 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
         const note = await readRelativeNote(relative);
         if (note === undefined) {
           continue;
+        }
+        charsRead += note.length;
+        if (charsRead > MAX_TYPST_PROJECT_CHARS) {
+          throw new Error("Typst project exceeds the content budget");
         }
         for (const hit of searchLines(note, query)) {
           if (hits.length >= SEARCH_LIMIT) {
@@ -794,7 +952,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     },
     readFile: async (path) => {
       try {
-        return await readTextFile(path);
+        return await readDocumentText(path);
       } catch {
         return null;
       }
@@ -839,7 +997,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
         }
         tagIndex.follow(root, files);
         indexOpenFile();
-      });
+      }).catch(() => undefined);
       return;
     }
     tagIndex.follow(root);
@@ -860,7 +1018,11 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       return;
     }
     const dest = joinRoot(session.projectRoot, resolved);
-    autosave.flush();
+    if (!(await isContainedDestination(session.projectRoot, dest))) {
+      await showError("The include points outside the project.");
+      return;
+    }
+    await autosave.flush();
     if (!(await ensureEmptyFile(dest))) {
       return;
     }
@@ -871,12 +1033,16 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.projectRoot === null) {
       return;
     }
-    autosave.flush();
+    await autosave.flush();
     const files = await listFiles();
     const assets = await listAssets();
     const relative = resolveWikiLink(target, files, assets);
     if (relative !== undefined) {
       const dest = joinRoot(session.projectRoot, relative);
+      if (!(await isContainedDestination(session.projectRoot, dest))) {
+        await showError("The wiki link points outside the project.");
+        return;
+      }
       if (!isNotePath(relative)) {
         try {
           await openLocalPath(dest);
@@ -893,6 +1059,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       return;
     }
     const dest = wikiCreatePath(target, session.projectRoot, session.path);
+    if (dest === undefined) {
+      await showError("The wiki link points outside the project.");
+      return;
+    }
+    if (!(await isContainedDestination(session.projectRoot, dest))) {
+      await showError("The wiki link points outside the project.");
+      return;
+    }
     if (await exists(dest)) {
       await switchTo(dest);
       return;
@@ -940,9 +1114,9 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     void getCurrentWindow()
       .onCloseRequested(async (event) => {
         captureCaret();
-        caretPersist.flush();
+        await caretPersist.flush();
         persistSession();
-        autosave.flush();
+        await autosave.flush();
         if (!(await confirmProceed())) {
           event.preventDefault();
         }
@@ -992,7 +1166,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     },
     disconnect: (): void => {
       captureCaret();
-      caretPersist.flush();
+      caretPersist.cancel();
       persistSession();
       autosave.cancel();
       fileWatch.disconnect();

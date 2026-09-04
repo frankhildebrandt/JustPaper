@@ -103,6 +103,18 @@ describe("collectTypstProjectFiles", () => {
     ]);
   });
 
+  it("rejects include graphs over their file or content budget", async () => {
+    const read = async (path: string): Promise<string | undefined> =>
+      path === "main.typ" ? '#include "a.typ"\n#include "b.typ"' : "content";
+
+    await expect(
+      collectTypstProjectFiles("main.typ", read, { maxFiles: 2 }),
+    ).rejects.toThrow("more than 2 files");
+    await expect(
+      collectTypstProjectFiles("main.typ", read, { maxChars: 10 }),
+    ).rejects.toThrow("exceeds 10 characters");
+  });
+
   it("lists missing includes without following them", async () => {
     expect(
       await collectTypstProjectFiles("main.typ", async (path) => {

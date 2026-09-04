@@ -1,19 +1,25 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import {
   Compartment,
+  EditorSelection,
   EditorState,
   Prec,
   StateEffect,
   StateField,
+  type SelectionRange,
+  type TransactionSpec,
   type Range,
 } from "@codemirror/state";
 import {
   Decoration,
+  Direction,
   EditorView,
   WidgetType,
   drawSelection,
   keymap,
   type DecorationSet,
+  type MouseSelectionStyle,
+  type ViewUpdate,
 } from "@codemirror/view";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { addAtxHash, removeAtxHash, type AtxEdit } from "./atxEdit";
@@ -69,7 +75,13 @@ import { externalLinkAt } from "./parseLink";
 import { openExternalUrl } from "./openExternalUrl";
 import { resolveImageSrc } from "./imageSrc";
 import { toggleTodoCheck } from "./parseTodo";
-import { allowCaretReveal, pointerSnapSelection, selectionLockHolds } from "./revealTiming";
+import { allowCaretReveal, selectionLockHolds } from "./revealTiming";
+import {
+  pointerRangeAt,
+  spanPointerRanges,
+  visualRowRangeAt,
+  type VisualRowHit,
+} from "./pointerSelection";
 
 /** Last known caret screen x so blank lines do not reset the visual column. */
 let lastCaretScreenX: number | undefined;
@@ -84,6 +96,9 @@ const setAssetBaseEffect = StateEffect.define<string | null>();
 const setGraphicEffect = StateEffect.define<boolean>();
 const setLanguageEffect = StateEffect.define<PaperLanguage>();
 const setPointerSelecting = StateEffect.define<boolean>();
+
+type PointerPoint = { pos: number; bias: number };
+const recentPointerClicks = new WeakMap<EditorView, PointerPoint>();
 
 const showMarksField = StateField.define<boolean>({
   create: () => true,
@@ -415,7 +430,7 @@ export type CaretScreenBox = {
 
 export type MarkdownEditor = {
   getDocument: () => string;
-  setDocument: (text: string, caretLine?: number) => void;
+  setDocument: (text: string, caretLine?: number, resetUndo?: boolean) => void;
   getCaretOffset: () => number;
   setCaretOffset: (offset: number) => void;
   isSelectionEmpty: () => boolean;
@@ -440,12 +455,38 @@ export type MarkdownEditor = {
   destroy: () => void;
 };
 
+type HistoryResetTarget = {
+  readonly state: EditorState;
+  dispatch: (spec: TransactionSpec) => void;
+};
+
+/**
+ * Replaces the complete buffer while dropping history from the previous
+ * document. Removing and re-adding the compartment is intentional: marking
+ * the replacement as non-historical would still map old undo entries through
+ * the new document and can splice unrelated file contents together.
+ */
+export function replaceDocumentWithFreshHistory(
+  target: HistoryResetTarget,
+  historyCompartment: Compartment,
+  text: string,
+  caret?: number,
+): void {
+  target.dispatch({
+    changes: { from: 0, to: target.state.doc.length, insert: text },
+    selection: caret === undefined ? undefined : { anchor: caret },
+    effects: historyCompartment.reconfigure([]),
+  });
+  target.dispatch({ effects: historyCompartment.reconfigure(history()) });
+}
+
 /**
  * Mounts a CodeMirror editor that styles markdown from our parser.
  */
 export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
   applyHeadingCssVars(parent);
   const editable = new Compartment();
+  const undoHistory = new Compartment();
   const caretListeners = new Set<() => void>();
   const changeListeners = new Set<() => void>();
   let wikiFollow: ((target: string) => void) | undefined;
@@ -508,7 +549,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         headingPrefixAtoms(),
         headingKeymap(),
         graphicNavKeymap(),
-        history(),
+        undoHistory.of(history()),
         keymap.of([
           {
             key: "Mod-Enter",
@@ -524,6 +565,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         EditorView.contentAttributes.of({ spellcheck: "false" }),
         editable.of(EditorView.editable.of(true)),
         paperTheme,
+        EditorView.mouseSelectionStyle.of(paperMouseSelectionStyle),
         EditorView.domEventHandlers({
           click: (event, current) => {
             if (!event.metaKey && !event.ctrlKey) {
@@ -556,18 +598,19 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     }),
   });
 
-  // Capture before CM so mark-reveal cannot thrash layout mid-click. After
-  // mouseup, mark-reveal still mutates the DOM; keep a short selection lock so
-  // WebKit's stale contenteditable caret cannot win.
-  let dragAnchor: number | null = null;
-  let dragHead: number | null = null;
+  // Defer mark-reveal while CodeMirror owns the complete standard pointer
+  // gesture (single/shift/double/triple click, drag, drag-move, auto-scroll).
+  // After mouseup, mark-reveal still mutates the DOM; keep a short selection
+  // lock so WebKit's stale contenteditable caret cannot win.
   let lockSnap: { anchor: number; head: number } | null = null;
   let lockUntilMs = 0;
+  let pointerGesture = 0;
+  let cancelPointerEnd: (() => void) | null = null;
   const snapPointerSelection = (): void => {
     const snap =
       lockSnap && selectionLockHolds(lockUntilMs, Date.now())
         ? lockSnap
-        : pointerSnapSelection(dragAnchor, dragHead);
+        : null;
     if (!snap) {
       return;
     }
@@ -581,22 +624,13 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     lockSnap = snap;
     lockUntilMs = Date.now() + 180;
   };
-  const onPointerDrag = (event: MouseEvent): void => {
-    if (dragAnchor === null || (event.buttons & 1) === 0) {
-      return;
-    }
-    const head = posAtClick(view, event.clientX, event.clientY);
-    if (head === null) {
-      return;
-    }
-    dragHead = head;
-    view.dispatch({ selection: { anchor: dragAnchor, head } });
+  const releaseSelectionLock = (): void => {
+    lockSnap = null;
+    lockUntilMs = 0;
+    document.removeEventListener("selectionchange", onNativeSelectionDrift);
   };
   const onNativeSelectionDrift = (): void => {
-    if (
-      view.state.field(pointerSelectingField) ||
-      (lockSnap !== null && selectionLockHolds(lockUntilMs, Date.now()))
-    ) {
+    if (lockSnap !== null && selectionLockHolds(lockUntilMs, Date.now())) {
       snapPointerSelection();
     }
   };
@@ -614,44 +648,36 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     if (hit?.closest(".md-table-wrap, .md-code-card, .md-hr-wrap")) {
       return;
     }
-    const pos = posAtClick(view, event.clientX, event.clientY);
-    if (pos === null) {
-      return;
-    }
-    dragAnchor = event.shiftKey ? view.state.selection.main.anchor : pos;
-    dragHead = pos;
+    pointerGesture += 1;
+    const gesture = pointerGesture;
     lockSnap = null;
     lockUntilMs = 0;
-    view.dispatch({
-      effects: setPointerSelecting.of(true),
-      selection: { anchor: dragAnchor, head: pos },
-    });
-    // Stop CM mouse-selection; we own the gesture + WebKit drift snaps.
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    view.focus();
-    document.addEventListener("selectionchange", onNativeSelectionDrift);
-    window.addEventListener("mousemove", onPointerDrag, true);
-    const endSelect = (): void => {
-      window.removeEventListener("mousemove", onPointerDrag, true);
+    document.removeEventListener("selectionchange", onNativeSelectionDrift);
+    view.dispatch({ effects: setPointerSelecting.of(true) });
+
+    const clearEndListeners = (): void => {
       window.removeEventListener("mouseup", endSelect, true);
       window.removeEventListener("blur", endSelect);
-      const snap = pointerSnapSelection(dragAnchor, dragHead);
-      dragAnchor = null;
-      dragHead = null;
-      if (snap) {
-        armSelectionLock(snap);
+      if (cancelPointerEnd === clearEndListeners) {
+        cancelPointerEnd = null;
       }
+    };
+    const endSelect = (): void => {
+      clearEndListeners();
       const finish = (): void => {
-        if (snap) {
-          snapPointerSelection();
+        if (gesture !== pointerGesture) {
+          return;
         }
         if (!view.state.field(pointerSelectingField)) {
           return;
         }
+        const main = view.state.selection.main;
+        const snap = { anchor: main.anchor, head: main.head };
+        armSelectionLock(snap);
+        document.addEventListener("selectionchange", onNativeSelectionDrift);
         view.dispatch({
           effects: setPointerSelecting.of(false),
-          selection: snap ?? undefined,
+          selection: snap,
         });
         // Reveal mutates DOM; keep re-asserting through the lock window.
         snapPointerSelection();
@@ -670,11 +696,15 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         window.requestAnimationFrame(finish);
       });
     };
+    cancelPointerEnd?.();
+    cancelPointerEnd = clearEndListeners;
     window.addEventListener("mouseup", endSelect, true);
     window.addEventListener("blur", endSelect);
   };
   view.contentDOM.addEventListener("mousedown", onPointerSelectStart, true);
   const onLinkHelperKeyDown = (event: KeyboardEvent): void => {
+    // A keyboard gesture supersedes the short post-pointer WebKit lock.
+    releaseSelectionLock();
     if (
       event.key !== "ArrowUp" &&
       event.key !== "ArrowDown" &&
@@ -705,11 +735,19 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
 
   return {
     getDocument: () => view.state.doc.toString(),
-    setDocument: (text: string, caretLine?: number): void => {
+    setDocument: (
+      text: string,
+      caretLine?: number,
+      resetUndo = false,
+    ): void => {
       const caret =
         caretLine === undefined
           ? undefined
           : offsetAtLine(text, caretLine);
+      if (resetUndo) {
+        replaceDocumentWithFreshHistory(view, undoHistory, text, caret);
+        return;
+      }
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: text },
         selection:
@@ -809,12 +847,195 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         onLinkHelperKeyDown,
         true,
       );
-      document.removeEventListener("selectionchange", onNativeSelectionDrift);
+      releaseSelectionLock();
+      cancelPointerEnd?.();
       caretListeners.clear();
       changeListeners.clear();
       view.destroy();
     },
   };
+}
+
+/**
+ * Keeps CodeMirror's standard mouse gesture engine while replacing only its
+ * coordinate mapping, which must account for JustPaper's hidden markdown
+ * marks and rendered widgets.
+ */
+function paperMouseSelectionStyle(
+  view: EditorView,
+  startEvent: MouseEvent,
+): MouseSelectionStyle | null {
+  if (startEvent.button !== 0) {
+    return null;
+  }
+  let startPoint = pointerPoint(view, startEvent);
+  const recent = recentPointerClicks.get(view);
+  if (startEvent.detail > 1 && !startPoint && recent) {
+    startPoint = recent;
+  }
+  if (!startPoint) {
+    return null;
+  }
+  if (startEvent.detail === 1) {
+    recentPointerClicks.set(view, startPoint);
+  } else if (startEvent.detail >= 3) {
+    recentPointerClicks.delete(view);
+  }
+
+  const clickCount: 1 | 2 | 3 =
+    startEvent.detail >= 3 ? 3 : startEvent.detail === 2 ? 2 : 1;
+  let startPos = startPoint.pos;
+  let startRange = pointerRangeForView(
+    view,
+    startPoint,
+    startEvent,
+    clickCount,
+  );
+  let startSelection = view.state.selection;
+
+  return {
+    update(update: ViewUpdate): void {
+      if (!update.docChanged) {
+        return;
+      }
+      startPos = update.changes.mapPos(startPos);
+      startRange = startRange.map(update.changes);
+      startSelection = startSelection.map(update.changes);
+    },
+    get(
+      currentEvent: MouseEvent,
+      extend: boolean,
+      multiple: boolean,
+    ): EditorSelection {
+      const currentPoint = pointerPoint(view, currentEvent, true) ?? startPoint;
+      const currentRange =
+        currentEvent.clientX === startEvent.clientX &&
+        currentEvent.clientY === startEvent.clientY
+          ? startRange
+          : pointerRangeForView(
+              view,
+              currentPoint,
+              currentEvent,
+              clickCount,
+            );
+      if (extend) {
+        return startSelection.replaceRange(
+          startSelection.main.extend(
+            currentRange.from,
+            currentRange.to,
+            currentRange.assoc,
+          ),
+        );
+      }
+      const range = spanPointerRanges(
+        startRange,
+        currentRange,
+        startPos,
+        currentPoint.pos,
+      );
+      if (multiple) {
+        return startSelection.addRange(range);
+      }
+      return EditorSelection.create([range]);
+    },
+  };
+}
+
+function pointerRangeForView(
+  view: EditorView,
+  point: PointerPoint,
+  event: MouseEvent,
+  clickCount: 1 | 2 | 3,
+): SelectionRange {
+  if (clickCount === 1 || clickCount === 2) {
+    return pointerRangeAt(view.state, point.pos, clickCount, point.bias);
+  }
+  return visualRowRangeAt(
+    view.state,
+    point.pos,
+    event.clientY,
+    visualRowHitsNear(view, point.pos, event.clientY),
+  );
+}
+
+/** Collects only the clicked visual row instead of scanning a long paragraph. */
+function visualRowHitsNear(
+  view: EditorView,
+  position: number,
+  clientY: number,
+): VisualRowHit[] {
+  const line = view.state.doc.lineAt(position);
+  const boxesAt = (pos: number): VisualRowHit[] => {
+    const hits: VisualRowHit[] = [];
+    for (const side of [-1, 1] as const) {
+      const box = view.coordsAtPos(pos, side);
+      if (box) {
+        hits.push({ pos, top: box.top, bottom: box.bottom });
+      }
+    }
+    return hits;
+  };
+  const seed = boxesAt(position).sort(
+    (a, b) =>
+      Math.abs((a.top + a.bottom) / 2 - clientY) -
+      Math.abs((b.top + b.bottom) / 2 - clientY),
+  )[0];
+  if (!seed) {
+    return [];
+  }
+  const middle = (seed.top + seed.bottom) / 2;
+  const slack = Math.max(2, (seed.bottom - seed.top) * 0.45);
+  const onRow = (hit: VisualRowHit): boolean =>
+    Math.abs((hit.top + hit.bottom) / 2 - middle) <= slack;
+  const hits: VisualRowHit[] = [];
+  hits.push(...boxesAt(position).filter(onRow));
+  for (let pos = position - 1; pos >= line.from; pos -= 1) {
+    const rowHits = boxesAt(pos).filter(onRow);
+    if (rowHits.length === 0) {
+      break;
+    }
+    hits.push(...rowHits);
+  }
+  for (let pos = position + 1; pos <= line.to; pos += 1) {
+    const rowHits = boxesAt(pos).filter(onRow);
+    if (rowHits.length === 0) {
+      break;
+    }
+    hits.push(...rowHits);
+  }
+  return hits;
+}
+
+function pointerPoint(
+  view: EditorView,
+  event: MouseEvent,
+  allowImprecise = false,
+): PointerPoint | null {
+  const pos = posAtClick(view, event.clientX, event.clientY);
+  if (pos === null) {
+    if (!allowImprecise) {
+      return null;
+    }
+    const estimated = view.posAndSideAtCoords(
+      { x: event.clientX, y: event.clientY },
+      false,
+    );
+    return { pos: estimated.pos, bias: estimated.assoc };
+  }
+  const nativeSide = view.posAndSideAtCoords({
+    x: event.clientX,
+    y: event.clientY,
+  });
+  if (nativeSide?.pos === pos) {
+    return { pos, bias: nativeSide.assoc };
+  }
+  const box = view.coordsAtPos(pos);
+  const visuallyBefore =
+    box && view.textDirectionAt(pos) === Direction.RTL
+      ? event.clientX > (box.left + box.right) / 2
+      : box && event.clientX < (box.left + box.right) / 2;
+  const bias = visuallyBefore ? -1 : 1;
+  return { pos, bias };
 }
 
 function headingPrefixAtoms() {
