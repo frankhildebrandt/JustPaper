@@ -6,10 +6,14 @@ const CI_WORKFLOWS = [
   ".github/workflows/release.yml",
 ];
 
+function readWorkflow(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
+}
+
 describe("workflow security", () => {
   it("pins every remote action to an immutable commit", () => {
     for (const path of CI_WORKFLOWS) {
-      const workflow = readFileSync(path, "utf8");
+      const workflow = readWorkflow(path);
       const uses = [...workflow.matchAll(/\buses:\s*([^@\s]+)@([^\s#]+)/g)];
       expect(uses.length, `${path} should contain actions`).toBeGreaterThan(0);
       for (const match of uses) {
@@ -19,7 +23,7 @@ describe("workflow security", () => {
   });
 
   it("validates the source before any release matrix job", () => {
-    const workflow = readFileSync(".github/workflows/release.yml", "utf8");
+    const workflow = readWorkflow(".github/workflows/release.yml");
     expect(workflow).toContain("validate-release:");
     expect(workflow).toMatch(/publish-tauri:\n\s+needs: validate-release/);
     expect(workflow).toContain(
