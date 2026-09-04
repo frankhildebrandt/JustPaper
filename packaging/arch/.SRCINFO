@@ -16,7 +16,7 @@ pkgbase = justpaper
 	depends = librsvg
 	source = justpaper-0.3.2.tar.gz::https://github.com/frankhildebrandt/JustPaper/archive/refs/tags/v0.3.2.tar.gz
 	source = justpaper.desktop
-	sha256sums = 7d470595437cebadea044a90196d49549adecdc13d63b8837a356268b1ecb9dd
+	sha256sums = 9886b4c57c197c5adbef5cebb4de3a1dd71409d7c65d9fa6de83a13c97798d7c
 	sha256sums = b0e08326f9e76da7b00e3c4942aa895de5bbfc6091cd231edf4f1b3470a9f24c
 
 pkgname = justpaper

@@ -1,6 +1,6 @@
 cask "justpaper" do
-  version "0.3.1"
-  sha256 "c9f66553c1a9427ee78f7bd6b0f38373e6f5ffa2aff44a7b5b68833d1ffbe302"
+  version "0.3.2"
+  sha256 "002e16c92637a9a1b52a99c1ee8e806c45e956fdac8ece99b7f9b3db093aedb9"
 
   url "https://github.com/frankhildebrandt/JustPaper/releases/download/v#{version}/JustPaper_#{version}_aarch64.dmg",
       verified: "github.com/frankhildebrandt/JustPaper/"
