@@ -30,3 +30,26 @@ describe("parseFence", () => {
     expect(parseFence("plain", 0)).toBeUndefined();
   });
 });
+
+describe("parseFence run lengths", () => {
+  it("requires a closing run at least as long as the opening run", () => {
+    const source = "````md\n```\ninner\n```\n````\nafter";
+    const fence = parseFence(source, 0);
+    expect(fence?.language).toBe("md");
+    expect(fence?.close).toEqual({ from: 21, to: 26 });
+  });
+
+  it("accepts a longer closing run", () => {
+    const source = "```\nx\n`````\n";
+    expect(parseFence(source, 0)?.close).toEqual({ from: 6, to: 12 });
+  });
+
+  it("does not close on a shorter run", () => {
+    const source = "````\nx\n```\n";
+    expect(parseFence(source, 0)?.close).toBeUndefined();
+  });
+
+  it("rejects an opening line whose info string contains a backtick", () => {
+    expect(parseFence("```foo``` text\nnext", 0)).toBeUndefined();
+  });
+});

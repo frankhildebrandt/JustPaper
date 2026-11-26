@@ -1,18 +1,17 @@
-export const AUTOSAVE_DELAY_MS = 800;
-
-export type Autosave = {
+export type Debounced = {
   schedule: () => void;
   flush: () => Promise<void>;
   cancel: () => void;
 };
 
 /**
- * Debounces `save` so it runs once after edits settle, with an explicit flush.
+ * Debounces `run` so it fires once after calls settle, serialised with any
+ * still-running previous call, with explicit flush and cancel.
  */
-export function bindAutosave(
-  save: () => void | Promise<void>,
-  delayMs: number = AUTOSAVE_DELAY_MS,
-): Autosave {
+export function bindDebounce(
+  run: () => void | Promise<void>,
+  delayMs: number,
+): Debounced {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active = Promise.resolve();
 
@@ -24,15 +23,15 @@ export function bindAutosave(
     timer = undefined;
   };
 
-  const run = (): Promise<void> => {
-    active = active.then(save).catch(() => undefined);
+  const start = (): Promise<void> => {
+    active = active.then(run).catch(() => undefined);
     return active;
   };
 
   const flush = (): Promise<void> => {
     if (timer !== undefined) {
       cancel();
-      void run();
+      void start();
     }
     return active;
   };
@@ -42,7 +41,7 @@ export function bindAutosave(
       cancel();
       timer = setTimeout(() => {
         timer = undefined;
-        void run().catch(() => undefined);
+        void start().catch(() => undefined);
       }, delayMs);
     },
     flush,

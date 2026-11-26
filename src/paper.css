@@ -402,6 +402,13 @@ body {
   color: var(--accent);
 }
 
+.palette-status {
+  padding: 10px 14px;
+  color: var(--ink-muted);
+  font-style: italic;
+  list-style: none;
+}
+
 .palette-item-title {
   flex: 1 1 8ch;
   min-width: 8ch;

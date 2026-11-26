@@ -1,3 +1,4 @@
+mod navigation;
 mod project;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -6,6 +7,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(navigation::guard())
         .invoke_handler(tauri::generate_handler![
             project::list_project_files,
             project::list_project_assets,

@@ -7,6 +7,7 @@ import {
 } from "@tauri-apps/api/menu";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import type { DocumentBinding } from "./document";
+import type { ProjectCommands } from "./projectCommands";
 import {
   checkedHighlightModeItems,
   type HighlightMode,
@@ -35,7 +36,11 @@ import {
   type HighlightColor,
   type SettingsBinding,
 } from "./settings";
-import { isWindowsChrome, toggleNativeFullscreen } from "./windowChrome";
+import {
+  isWindowsChrome,
+  requestWindowClose,
+  toggleNativeFullscreen,
+} from "./windowChrome";
 import {
   checkedViewModeItems,
   type ViewMode,
@@ -46,19 +51,10 @@ function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-export type ProjectCommands = {
-  quickOpen: () => void;
-  findInProject: () => void;
-  jumpOutgoing: () => void;
-  jumpIncoming: () => void;
-  lastOpened: () => void;
-  findInDocument: () => void;
-};
 
 type MenuShortcut = {
   accelerator: string;
   action: () => void;
-  enabled?: () => boolean;
 };
 
 /**
@@ -151,16 +147,30 @@ function arrowKey(expected: string): string | undefined {
   }
 }
 
+const QUIT_ACCELERATOR = "CmdOrCtrl+Q";
+
+/**
+ * Builds a Quit item that closes the window through the unsaved-changes prompt;
+ * the predefined Quit item would terminate the app without asking.
+ */
+async function quitMenuItem(): Promise<MenuItem> {
+  return MenuItem.new({
+    id: "app-quit",
+    text: "JustPaper beenden",
+    accelerator: QUIT_ACCELERATOR,
+    action: requestWindowClose,
+  });
+}
+
 function rememberShortcut(
   shortcuts: MenuShortcut[],
   accelerator: string | undefined,
   action: (() => void) | undefined,
-  enabled?: () => boolean,
 ): void {
   if (!accelerator || !action) {
     return;
   }
-  shortcuts.push({ accelerator, action, enabled });
+  shortcuts.push({ accelerator, action });
 }
 
 /**
@@ -173,13 +183,12 @@ async function fileMenuItems(
 ) {
   const recents = paperDoc.recents();
   const labels = recentFileLabels(recents);
-  const inProject = paperDoc.projectRoot() !== null;
   const recentItems =
     recents.length === 0
       ? [
           await MenuItem.new({
             id: "file-recent-empty",
-            text: "No Recent Files",
+            text: "Keine zuletzt geöffneten Dateien",
             enabled: false,
           }),
         ]
@@ -244,20 +253,10 @@ async function fileMenuItems(
   rememberShortcut(shortcuts, "Shift+CmdOrCtrl+O", openFolderAction);
   rememberShortcut(shortcuts, "CmdOrCtrl+S", saveAction);
   rememberShortcut(shortcuts, "Shift+CmdOrCtrl+S", saveAsAction);
-  rememberShortcut(shortcuts, "CmdOrCtrl+P", quickOpenAction, () => inProject);
-  rememberShortcut(
-    shortcuts,
-    "CmdOrCtrl+Shift+P",
-    findInProjectAction,
-    () => inProject,
-  );
-  rememberShortcut(shortcuts, "CmdOrCtrl+J", jumpOutgoingAction, () => inProject);
-  rememberShortcut(
-    shortcuts,
-    "Shift+CmdOrCtrl+J",
-    jumpIncomingAction,
-    () => inProject,
-  );
+  rememberShortcut(shortcuts, "CmdOrCtrl+P", quickOpenAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+Shift+P", findInProjectAction);
+  rememberShortcut(shortcuts, "CmdOrCtrl+J", jumpOutgoingAction);
+  rememberShortcut(shortcuts, "Shift+CmdOrCtrl+J", jumpIncomingAction);
   rememberShortcut(shortcuts, "CmdOrCtrl+E", lastOpenedAction);
   rememberShortcut(shortcuts, "CmdOrCtrl+Alt+Left", goBackAction);
   rememberShortcut(shortcuts, "CmdOrCtrl+Alt+Right", goForwardAction);
@@ -271,7 +270,7 @@ async function fileMenuItems(
     }),
     await MenuItem.new({
       id: "file-open",
-      text: "Open",
+      text: "Öffnen...",
       accelerator: "CmdOrCtrl+O",
       action: openAction,
     }),
@@ -288,13 +287,13 @@ async function fileMenuItems(
     }),
     await MenuItem.new({
       id: "file-save",
-      text: "Save",
+      text: "Speichern",
       accelerator: "CmdOrCtrl+S",
       action: saveAction,
     }),
     await MenuItem.new({
       id: "file-save-as",
-      text: "Save As...",
+      text: "Speichern unter...",
       accelerator: "Shift+CmdOrCtrl+S",
       action: saveAsAction,
     }),
@@ -303,28 +302,24 @@ async function fileMenuItems(
       id: "file-quick-open",
       text: "Datei suchen",
       accelerator: "CmdOrCtrl+P",
-      enabled: inProject,
       action: quickOpenAction,
     }),
     await MenuItem.new({
       id: "file-find-in-project",
       text: "Im Projekt suchen",
       accelerator: "CmdOrCtrl+Shift+P",
-      enabled: inProject,
       action: findInProjectAction,
     }),
     await MenuItem.new({
       id: "file-jump-outgoing",
       text: "Ausgehende Links",
       accelerator: "CmdOrCtrl+J",
-      enabled: inProject,
       action: jumpOutgoingAction,
     }),
     await MenuItem.new({
       id: "file-jump-incoming",
       text: "Eingehende Links",
       accelerator: "Shift+CmdOrCtrl+J",
-      enabled: inProject,
       action: jumpIncomingAction,
     }),
     await MenuItem.new({
@@ -567,7 +562,7 @@ export async function bindAppMenu(
     });
     headlineItem = await CheckMenuItem.new({
       id: "highlight-headline",
-      text: "Headline",
+      text: "Überschrift",
       checked: highlightChecked.headline,
       action: () => {
         selectHighlight("headline");
@@ -715,29 +710,32 @@ export async function bindAppMenu(
     );
     typstFeatureItems = typstMenu.byId;
 
+    rememberShortcut(nextShortcuts, QUIT_ACCELERATOR, requestWindowClose);
+    const aboutItem = await PredefinedMenuItem.new({
+      text: "Über JustPaper",
+      item: { About: { name: "JustPaper" } },
+    });
+    const quitItem = await quitMenuItem();
     const appItems = windows
       ? [
-          await PredefinedMenuItem.new({
-            item: { About: { name: "JustPaper" } },
-          }),
+          aboutItem,
           await PredefinedMenuItem.new({ item: "Separator" }),
-          await PredefinedMenuItem.new({ item: "Quit" }),
+          quitItem,
         ]
       : [
-          await PredefinedMenuItem.new({
-            item: { About: { name: "JustPaper" } },
-          }),
+          aboutItem,
           await PredefinedMenuItem.new({ item: "Separator" }),
-          await PredefinedMenuItem.new({ item: "Hide" }),
-          await PredefinedMenuItem.new({ item: "HideOthers" }),
-          await PredefinedMenuItem.new({ item: "Quit" }),
+          await PredefinedMenuItem.new({ text: "JustPaper ausblenden", item: "Hide" }),
+          await PredefinedMenuItem.new({ text: "Andere ausblenden", item: "HideOthers" }),
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          quitItem,
         ];
     const appSubmenu = await Submenu.new({
       text: "JustPaper",
       items: appItems,
     });
     const fileSubmenu = await Submenu.new({
-      text: "File",
+      text: "Datei",
       items: await fileMenuItems(paperDoc, project, nextShortcuts),
     });
     const findInDocumentAction = (): void => {
@@ -745,15 +743,15 @@ export async function bindAppMenu(
     };
     rememberShortcut(nextShortcuts, "CmdOrCtrl+F", findInDocumentAction);
     const editSubmenu = await Submenu.new({
-      text: "Edit",
+      text: "Bearbeiten",
       items: [
-        await PredefinedMenuItem.new({ item: "Undo" }),
-        await PredefinedMenuItem.new({ item: "Redo" }),
+        await PredefinedMenuItem.new({ text: "Widerrufen", item: "Undo" }),
+        await PredefinedMenuItem.new({ text: "Wiederholen", item: "Redo" }),
         await PredefinedMenuItem.new({ item: "Separator" }),
-        await PredefinedMenuItem.new({ item: "Cut" }),
-        await PredefinedMenuItem.new({ item: "Copy" }),
-        await PredefinedMenuItem.new({ item: "Paste" }),
-        await PredefinedMenuItem.new({ item: "SelectAll" }),
+        await PredefinedMenuItem.new({ text: "Ausschneiden", item: "Cut" }),
+        await PredefinedMenuItem.new({ text: "Kopieren", item: "Copy" }),
+        await PredefinedMenuItem.new({ text: "Einsetzen", item: "Paste" }),
+        await PredefinedMenuItem.new({ text: "Alles auswählen", item: "SelectAll" }),
         await PredefinedMenuItem.new({ item: "Separator" }),
         await MenuItem.new({
           id: "edit-find-in-document",
@@ -776,7 +774,7 @@ export async function bindAppMenu(
       items: typstMenu.items,
     });
     const viewSubmenu = await Submenu.new({
-      text: "View",
+      text: "Darstellung",
       items: [
         normalItem,
         typewriterItem,
@@ -844,9 +842,6 @@ export async function bindAppMenu(
   const onKeyDown = (event: KeyboardEvent): void => {
     for (const shortcut of shortcuts) {
       if (!matchesAccelerator(event, shortcut.accelerator)) {
-        continue;
-      }
-      if (shortcut.enabled && !shortcut.enabled()) {
         continue;
       }
       event.preventDefault();

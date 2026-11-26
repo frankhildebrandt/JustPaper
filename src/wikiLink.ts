@@ -1,4 +1,6 @@
 import { lineAtOffset } from "./caret";
+import { codeRangeAt, codeRanges } from "./codeRanges";
+import { hasFileExtension } from "./filename";
 
 export type WikiLink = {
   target: string;
@@ -82,15 +84,21 @@ export function wikiLinkAt(
 }
 
 /**
- * Returns every wiki link in `source`.
+ * Returns every wiki link in `source`, skipping inline code and fenced blocks.
  */
 export function wikiLinksIn(source: string): WikiLink[] {
   const links: WikiLink[] = [];
+  const code = codeRanges(source);
   let cursor = 0;
   while (cursor < source.length) {
     const open = source.indexOf("[[", cursor);
     if (open === -1) {
       break;
+    }
+    const inCode = codeRangeAt(code, open);
+    if (inCode) {
+      cursor = inCode.to;
+      continue;
     }
     const link = parseWikiLink(source, open);
     if (!link) {
@@ -105,11 +113,14 @@ export function wikiLinksIn(source: string): WikiLink[] {
 
 /**
  * Returns unique outgoing wiki targets in first-occurrence order.
+ * `fromPath` is the current note's project-relative path; ambiguous names
+ * prefer a match in its folder.
  */
 export function outgoingWikiLinks(
   source: string,
   files: readonly string[],
   assets: readonly string[] = [],
+  fromPath?: string,
 ): OutgoingWikiLink[] {
   const seen = new Set<string>();
   const outgoing: OutgoingWikiLink[] = [];
@@ -122,14 +133,15 @@ export function outgoingWikiLinks(
     outgoing.push({
       target: link.target,
       alias: link.alias,
-      path: resolveWikiLink(link.target, files, assets),
+      path: resolveWikiLink(link.target, files, assets, fromPath),
     });
   }
   return outgoing;
 }
 
 /**
- * Returns wiki links in other notes that resolve to `currentRelative`.
+ * Returns wiki links in other notes that resolve to `currentRelative`,
+ * resolving each link from the folder of the note that contains it.
  */
 export function incomingWikiLinks(
   currentRelative: string,
@@ -142,7 +154,8 @@ export function incomingWikiLinks(
       continue;
     }
     for (const link of wikiLinksIn(note.content)) {
-      if (resolveWikiLink(link.target, files) !== currentRelative) {
+      const resolved = resolveWikiLink(link.target, files, [], note.path);
+      if (resolved !== currentRelative) {
         continue;
       }
       incoming.push({
@@ -174,42 +187,43 @@ export function isNotePath(path: string): boolean {
  */
 export function isWikiAssetTarget(target: string): boolean {
   const base = basename(target);
-  const dot = base.lastIndexOf(".");
-  if (dot <= 0) {
-    return false;
-  }
-  return !isNotePath(base);
+  return hasFileExtension(base) && !isNotePath(base);
 }
 
 /**
  * Returns the project-relative path of an existing file for `target`.
  * Notes win over attachments; `[[scan]]` matches `scan.pdf` only when no note exists.
+ * Ambiguous names prefer a match in the folder of `fromPath` (the linking
+ * note's project-relative path), then the shortest path.
  */
 export function resolveWikiLink(
   target: string,
   files: readonly string[],
   assets: readonly string[] = [],
+  fromPath?: string,
 ): string | undefined {
-  const note = matchWiki(target, files, wikiStem);
+  const near = fromPath === undefined ? undefined : dirname(fromPath);
+  const note = matchWiki(target, files, noteStem, near);
   if (note !== undefined) {
     return note;
   }
-  const named = matchWiki(target, assets, wikiStem);
+  const named = matchWiki(target, assets, noteStem, near);
   if (named !== undefined) {
     return named;
   }
   if (isWikiAssetTarget(target)) {
     return undefined;
   }
-  return matchWiki(target, assets, stripExtension);
+  return matchWiki(target, assets, stripExtension, near);
 }
 
 function matchWiki(
   target: string,
   files: readonly string[],
   stem: (path: string) => string,
+  nearDir: string | undefined,
 ): string | undefined {
-  const needle = stem(normalizeFsPath(target)).toLowerCase();
+  const needle = noteStem(normalizeFsPath(target)).toLowerCase();
   if (needle.includes("/")) {
     return files.find(
       (file) => stem(normalizeFsPath(file)).toLowerCase() === needle,
@@ -218,8 +232,19 @@ function matchWiki(
   const matches = files.filter(
     (file) => stem(basename(file)).toLowerCase() === needle,
   );
-  if (matches.length === 0) {
-    return undefined;
+  return closestMatch(matches, nearDir);
+}
+
+/**
+ * Picks a match in `nearDir` first, otherwise the shortest path.
+ */
+function closestMatch(
+  matches: readonly string[],
+  nearDir: string | undefined,
+): string | undefined {
+  const sameFolder = matches.find((file) => dirname(file) === nearDir);
+  if (sameFolder !== undefined) {
+    return sameFolder;
   }
   return [...matches].sort(
     (a, b) => a.length - b.length || a.localeCompare(b),
@@ -289,7 +314,10 @@ function withMarkdownExtension(target: string): string {
   return `${target}.md`;
 }
 
-function wikiStem(path: string): string {
+/**
+ * Returns `path` without a trailing note extension (md, txt, typ).
+ */
+export function noteStem(path: string): string {
   return path.replace(/\.(md|txt|typ)$/i, "");
 }
 

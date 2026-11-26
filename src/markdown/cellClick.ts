@@ -8,7 +8,9 @@ import { nativeCaretFromPoint } from "./caretPoint";
 
 /**
  * Maps a displayed-character index inside a rendered cell to a source offset
- * within that cell's markdown text (marks like ** and ` are not displayed).
+ * within that cell's markdown text (marks like ** and ` are not displayed;
+ * links, wiki links and images display only their label / alt text).
+ * `features` must match the ones the cell was rendered with.
  */
 export function displayOffsetToSource(
   cellSource: string,
@@ -49,7 +51,7 @@ export function displayOffsetToSource(
         }
         continue;
       }
-      if (span.kind === "wiki" || span.kind === "link") {
+      if (span.kind === "wiki" || span.kind === "link" || span.kind === "image") {
         const len = span.label.to - span.label.from;
         if (clamped < seen + len) {
           return span.label.from + (clamped - seen);
@@ -157,7 +159,7 @@ export function sourcePosFromCellClick(
   cell: HTMLElement,
   clientX: number,
   clientY: number,
-  features: MarkdownFeatures = DEFAULT_MARKDOWN_FEATURES,
+  features: MarkdownFeatures,
 ): number {
   const displayOffset = displayOffsetFromPoint(cell, clientX, clientY);
   return (

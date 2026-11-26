@@ -374,3 +374,22 @@ describe("parseTypst", () => {
     expect(child.table.rows.every((row) => row.length === 3)).toBe(true);
   });
 });
+
+describe("indented typst lists", () => {
+  it("parses an indented bullet with its mark after the indent", () => {
+    expect(parseTypst("  - nested")[0]).toMatchObject({
+      kind: "list",
+      listKind: "bullet",
+      from: 0,
+      mark: { from: 2, to: 4 },
+    });
+  });
+
+  it("parses an indented enum item under a parent", () => {
+    expect(parseTypst("+ one\n\t+ two")[1]).toMatchObject({
+      kind: "list",
+      listKind: "enum",
+      mark: { from: 7, to: 9 },
+    });
+  });
+});

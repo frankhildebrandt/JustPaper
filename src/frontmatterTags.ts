@@ -1,3 +1,4 @@
+import { toLf } from "./lineEndings";
 import { parseFrontmatter } from "./markdown/parseFrontmatter";
 
 const FENCE = "---";
@@ -5,9 +6,11 @@ const TAG_KEY = /^(tags|tag):\s*(.*)$/;
 const LIST_ITEM = /^\s*-\s+(.*)$/;
 
 /**
- * Returns unique frontmatter tags in first-seen order from a YAML fence at offset 0.
+ * Returns unique frontmatter tags in first-seen order from a YAML fence at
+ * offset 0. CRLF and CR line endings are treated like LF.
  */
-export function extractFrontmatterTags(source: string): string[] {
+export function extractFrontmatterTags(raw: string): string[] {
+  const source = toLf(raw);
   const range = parseFrontmatter(source, 0);
   if (range === undefined) {
     return [];

@@ -148,6 +148,7 @@ export type ListBlock = {
 export type Block = ParagraphBlock | HeadingBlock | CodeblockBlock | ListBlock;
 
 const HEADING = /^(={1,6}) /;
+const LIST_INDENT = /^[ \t]*/;
 const LIST_BULLET = /^- /;
 const LIST_ENUM = /^\+ /;
 const LIST_TERM = /^\/ /;
@@ -332,7 +333,9 @@ function parseListLine(
   to: number,
   features: TypstFeatures,
 ): ListBlock | undefined {
-  const line = source.slice(from, to);
+  const indent = LIST_INDENT.exec(source.slice(from, to))?.[0].length ?? 0;
+  const markFrom = from + indent;
+  const line = source.slice(markFrom, to);
   let listKind: ListBlock["listKind"] | undefined;
   if (LIST_BULLET.test(line)) {
     listKind = "bullet";
@@ -344,14 +347,14 @@ function parseListLine(
   if (!listKind) {
     return undefined;
   }
-  const markTo = from + 2;
+  const markTo = markFrom + 2;
   const children = parseInline(source, markTo, to, features);
   return {
     kind: "list",
     listKind,
     from,
     to: spanEnd(children, to),
-    mark: { from, to: markTo },
+    mark: { from: markFrom, to: markTo },
     children,
   };
 }

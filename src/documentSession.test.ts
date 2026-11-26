@@ -8,8 +8,8 @@ import {
   applyRename,
   applySave,
   createDocumentSession,
+  diskChangeAction,
   isDirty,
-  shouldApplyDiskText,
 } from "./documentSession";
 
 describe("isDirty", () => {
@@ -22,17 +22,22 @@ describe("isDirty", () => {
   });
 });
 
-describe("shouldApplyDiskText", () => {
-  it("applies when the editor is clean and disk differs", () => {
-    expect(shouldApplyDiskText("# Hello", "# Hello", "# World")).toBe(true);
+describe("diskChangeAction", () => {
+  it("reloads when the editor is clean and disk differs", () => {
+    expect(diskChangeAction("# Hello", "# Hello", "# World")).toBe("reload");
   });
 
-  it("skips when the editor already matches disk", () => {
-    expect(shouldApplyDiskText("# Hello", "# Hello", "# Hello")).toBe(false);
+  it("ignores when the editor already matches disk", () => {
+    expect(diskChangeAction("# Hello", "# Hello", "# Hello")).toBe("ignore");
+    expect(diskChangeAction("# Draft", "# Hello", "# Draft")).toBe("ignore");
   });
 
-  it("skips when the editor has unsaved edits", () => {
-    expect(shouldApplyDiskText("# Draft", "# Hello", "# World")).toBe(false);
+  it("ignores our own last write while newer edits are pending", () => {
+    expect(diskChangeAction("# Draft", "# Hello", "# Hello")).toBe("ignore");
+  });
+
+  it("reports a conflict when both the editor and disk changed", () => {
+    expect(diskChangeAction("# Draft", "# Hello", "# World")).toBe("conflict");
   });
 });
 

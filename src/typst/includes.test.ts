@@ -214,3 +214,15 @@ describe("relativeTypstIncludePath", () => {
     );
   });
 });
+
+describe("resolveTypstInclude from the project root", () => {
+  it("resolves a leading slash against the project root", () => {
+    expect(resolveTypstInclude("kapitel/a.typ", "/chapters/intro.typ")).toBe(
+      "chapters/intro.typ",
+    );
+  });
+
+  it("rejects a root path that escapes the project", () => {
+    expect(resolveTypstInclude("main.typ", "/../x.typ")).toBeUndefined();
+  });
+});

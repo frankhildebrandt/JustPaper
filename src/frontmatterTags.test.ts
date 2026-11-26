@@ -51,3 +51,18 @@ describe("extractFrontmatterTags", () => {
     ).toEqual(["top"]);
   });
 });
+
+describe("extractFrontmatterTags with CRLF", () => {
+  it("reads a flow sequence from a CRLF note", () => {
+    expect(extractFrontmatterTags("---\r\ntags: [a, b]\r\n---\r\n")).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("reads a block list from a CRLF note", () => {
+    expect(
+      extractFrontmatterTags("---\r\ntags:\r\n  - work\r\n---\r\nbody"),
+    ).toEqual(["work"]);
+  });
+});

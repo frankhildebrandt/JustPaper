@@ -149,8 +149,52 @@ export function typewriterFollowAfterGesture(
   }
 }
 
+export type FrameScheduler = {
+  request: (callback: FrameRequestCallback) => number;
+  cancel: (id: number) => void;
+};
+
+export type CoalescedHandler = {
+  schedule: () => void;
+  cancel: () => void;
+};
+
+const ANIMATION_FRAMES: FrameScheduler = {
+  request: (callback) => requestAnimationFrame(callback),
+  cancel: (id) => cancelAnimationFrame(id),
+};
+
 /**
- * Adapts a textarea to the typewriter scroll host.
+ * Runs `handler` at most once per animation frame, however often it is scheduled.
+ */
+export function coalesceToFrame(
+  handler: () => void,
+  frames: FrameScheduler = ANIMATION_FRAMES,
+): CoalescedHandler {
+  let pending: number | undefined;
+  return {
+    schedule: (): void => {
+      if (pending !== undefined) {
+        return;
+      }
+      pending = frames.request(() => {
+        pending = undefined;
+        handler();
+      });
+    },
+    cancel: (): void => {
+      if (pending !== undefined) {
+        frames.cancel(pending);
+        pending = undefined;
+      }
+    },
+  };
+}
+
+/**
+ * Adapts a textarea to the typewriter scroll host. Caret events (input,
+ * click, keyup, selectionchange) are coalesced into one handler call per
+ * frame so each keystroke measures the caret only once.
  */
 export function textareaTypewriterTarget(
   textarea: HTMLTextAreaElement,
@@ -160,15 +204,18 @@ export function textareaTypewriterTarget(
     isFocused: () => document.activeElement === textarea,
     measureCaretTopPx: () => measureCaretTopPx(textarea),
     onCaretMoved: (handler: () => void): (() => void) => {
-      textarea.addEventListener("input", handler);
-      textarea.addEventListener("click", handler);
-      textarea.addEventListener("keyup", handler);
-      document.addEventListener("selectionchange", handler);
+      const coalesced = coalesceToFrame(handler);
+      const { schedule } = coalesced;
+      textarea.addEventListener("input", schedule);
+      textarea.addEventListener("click", schedule);
+      textarea.addEventListener("keyup", schedule);
+      document.addEventListener("selectionchange", schedule);
       return () => {
-        textarea.removeEventListener("input", handler);
-        textarea.removeEventListener("click", handler);
-        textarea.removeEventListener("keyup", handler);
-        document.removeEventListener("selectionchange", handler);
+        coalesced.cancel();
+        textarea.removeEventListener("input", schedule);
+        textarea.removeEventListener("click", schedule);
+        textarea.removeEventListener("keyup", schedule);
+        document.removeEventListener("selectionchange", schedule);
       };
     },
   };

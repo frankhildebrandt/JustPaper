@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bindAutosave } from "./autosave";
+import { bindDebounce } from "./debounce";
 
-describe("bindAutosave", () => {
+describe("bindDebounce", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -9,10 +9,10 @@ describe("bindAutosave", () => {
   it("saves once after the debounce window", async () => {
     vi.useFakeTimers();
     const save = vi.fn();
-    const autosave = bindAutosave(save, 800);
+    const debounced = bindDebounce(save, 800);
 
-    autosave.schedule();
-    autosave.schedule();
+    debounced.schedule();
+    debounced.schedule();
     expect(save).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(800);
@@ -22,10 +22,10 @@ describe("bindAutosave", () => {
   it("flush saves immediately and cancels the pending timer", async () => {
     vi.useFakeTimers();
     const save = vi.fn();
-    const autosave = bindAutosave(save, 800);
+    const debounced = bindDebounce(save, 800);
 
-    autosave.schedule();
-    await autosave.flush();
+    debounced.schedule();
+    await debounced.flush();
     expect(save).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(800);
@@ -43,12 +43,12 @@ describe("bindAutosave", () => {
         }),
       )
       .mockResolvedValueOnce();
-    const autosave = bindAutosave(save, 800);
+    const debounced = bindDebounce(save, 800);
 
-    autosave.schedule();
+    debounced.schedule();
     await vi.advanceTimersByTimeAsync(800);
-    autosave.schedule();
-    const flushed = autosave.flush();
+    debounced.schedule();
+    const flushed = debounced.flush();
 
     expect(save).toHaveBeenCalledTimes(1);
     finishFirst?.();
@@ -62,24 +62,24 @@ describe("bindAutosave", () => {
       .fn<() => Promise<void>>()
       .mockRejectedValueOnce(new Error("save failed"))
       .mockResolvedValueOnce();
-    const autosave = bindAutosave(save, 800);
+    const debounced = bindDebounce(save, 800);
 
-    autosave.schedule();
+    debounced.schedule();
     await vi.advanceTimersByTimeAsync(800);
-    await expect(autosave.flush()).resolves.toBeUndefined();
+    await expect(debounced.flush()).resolves.toBeUndefined();
 
-    autosave.schedule();
-    await expect(autosave.flush()).resolves.toBeUndefined();
+    debounced.schedule();
+    await expect(debounced.flush()).resolves.toBeUndefined();
     expect(save).toHaveBeenCalledTimes(2);
   });
 
   it("cancel drops a pending save", () => {
     vi.useFakeTimers();
     const save = vi.fn();
-    const autosave = bindAutosave(save, 800);
+    const debounced = bindDebounce(save, 800);
 
-    autosave.schedule();
-    autosave.cancel();
+    debounced.schedule();
+    debounced.cancel();
     vi.advanceTimersByTime(800);
     expect(save).not.toHaveBeenCalled();
   });

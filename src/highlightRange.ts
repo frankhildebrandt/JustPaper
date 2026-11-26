@@ -82,27 +82,33 @@ export function paragraphRanges(source: string): SourceRange[] {
   return ranges;
 }
 
+const SENTENCE_END = /[.?!\u2026]/;
+const NOT_SENTENCE_END =
+  /(^|[^\p{L}])(z\. ?b\.|d\. ?h\.|u\. ?a\.|bzw\.|ca\.|usw\.|dr\.|nr\.|s\.)/giu;
+
 /**
- * Splits a paragraph into sentences. A sentence ends at `. ` or at a
- * period whose remainder to the paragraph end is only whitespace.
+ * Splits a paragraph into sentences. A sentence ends at `.`, `?`, `!` or `…`
+ * followed by whitespace, or at a terminator whose remainder to the paragraph
+ * end is only whitespace. Periods of common German abbreviations never end
+ * a sentence.
  */
 function sentenceRanges(source: string, paragraph: SourceRange): SourceRange[] {
   const ranges: SourceRange[] = [];
+  const protectedEnds = abbreviationPeriods(source, paragraph);
   let start = paragraph.from;
   for (let index = paragraph.from; index < paragraph.to; index += 1) {
-    if (source[index] !== ".") {
+    if (!SENTENCE_END.test(source[index]) || protectedEnds.has(index)) {
       continue;
     }
     const after = index + 1;
-    if (after < paragraph.to && source[after] === " ") {
-      ranges.push({ from: start, to: after + 1 });
-      start = after + 1;
-      continue;
-    }
     if (source.slice(after, paragraph.to).trim() === "") {
       ranges.push({ from: start, to: paragraph.to });
       start = paragraph.to;
       break;
+    }
+    if (/\s/.test(source[after])) {
+      ranges.push({ from: start, to: after + 1 });
+      start = after + 1;
     }
   }
   if (start < paragraph.to) {
@@ -112,6 +118,27 @@ function sentenceRanges(source: string, paragraph: SourceRange): SourceRange[] {
     return [paragraph];
   }
   return ranges;
+}
+
+/**
+ * Returns offsets of periods that belong to abbreviations like "z. B.".
+ */
+function abbreviationPeriods(
+  source: string,
+  paragraph: SourceRange,
+): Set<number> {
+  const text = source.slice(paragraph.from, paragraph.to);
+  const periods = new Set<number>();
+  for (const match of text.matchAll(NOT_SENTENCE_END)) {
+    const [, lead, abbreviation] = match;
+    const from = paragraph.from + (match.index ?? 0) + lead.length;
+    for (let offset = 0; offset < abbreviation.length; offset += 1) {
+      if (abbreviation[offset] === ".") {
+        periods.add(from + offset);
+      }
+    }
+  }
+  return periods;
 }
 
 /**

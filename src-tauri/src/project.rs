@@ -30,7 +30,7 @@ pub struct ProjectNote {
 /**
  * Lists project-relative markdown, Typst, and text files under `root`.
  */
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_project_files(root: String) -> Result<Vec<String>, String> {
     walk_project_files(&PathBuf::from(root), is_note)
 }
@@ -38,7 +38,7 @@ pub fn list_project_files(root: String) -> Result<Vec<String>, String> {
 /**
  * Lists project-relative files that are not notes, such as PDFs.
  */
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_project_assets(root: String) -> Result<Vec<String>, String> {
     walk_project_files(&PathBuf::from(root), |path| !is_note(path))
 }
@@ -104,7 +104,7 @@ fn walk_project_files_with_limits(
 /**
  * Searches note contents under `root` for a case-insensitive substring.
  */
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search_project(root: String, query: String) -> Result<Vec<SearchHit>, String> {
     if query.trim().is_empty() {
         return Ok(Vec::new());
@@ -147,7 +147,7 @@ pub fn search_project(root: String, query: String) -> Result<Vec<SearchHit>, Str
 /**
  * Reads project-relative note contents under `root`, skipping oversized files.
  */
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_project_notes(root: String) -> Result<Vec<ProjectNote>, String> {
     let files = list_project_files(root.clone())?;
     let root = PathBuf::from(root);

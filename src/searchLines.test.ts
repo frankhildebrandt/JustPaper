@@ -29,3 +29,11 @@ describe("searchLines", () => {
     });
   });
 });
+
+describe("searchLines with CRLF", () => {
+  it("strips a trailing carriage return from hit text", () => {
+    expect(searchLines("one\r\ntwo end\r\n", "end")).toEqual([
+      { line: 2, text: "two end" },
+    ]);
+  });
+});

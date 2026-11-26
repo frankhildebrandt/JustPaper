@@ -1,11 +1,14 @@
 import type { DecorationKind, DecorationSpec } from "../markdown/decorationSpecs";
 import type { CellNode } from "../markdown/tableCells";
 import type { Block, InlineSpan, TypstTableCell, TypstTableGrid } from "./parse";
+import { typstImageHref } from "./projectPath";
 
 export type TypstDecorationOptions = {
   showMarks: boolean;
   caret?: number;
   source?: string;
+  /** Absolute project root; resolves root-relative `#image("/…")` paths. */
+  projectRoot?: string;
 };
 
 /**
@@ -207,13 +210,17 @@ function inlineSpecs(
     ];
   }
   if (span.kind === "hash") {
-    if (!show && span.imageSrc !== undefined) {
+    const imageHref =
+      span.imageSrc === undefined
+        ? undefined
+        : typstImageHref(span.imageSrc, options.projectRoot);
+    if (!show && imageHref !== undefined) {
       return [
         {
           kind: "image-widget",
           from: span.from,
           to: span.to,
-          href: span.imageSrc,
+          href: imageHref,
           alt: "",
         },
       ];

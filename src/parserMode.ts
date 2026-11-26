@@ -105,7 +105,7 @@ export type ParserModeBinding = {
   setMarkdownFeatures: (features: MarkdownFeatures) => void;
   setMarkdownGraphic: (enabled: boolean) => void;
   setTypstFeatures: (features: TypstFeatures) => void;
-  setAssetBase: (dir: string | null) => void;
+  setAssetBase: (dir: string | null, projectRoot?: string | null) => void;
   focus: () => void;
   disconnect: () => void;
 };
@@ -400,8 +400,8 @@ export function bindParserMode(
     setTypstFeatures: (features: TypstFeatures): void => {
       markdown.setTypstFeatures(features);
     },
-    setAssetBase: (dir: string | null): void => {
-      markdown.setAssetBase(dir);
+    setAssetBase: (dir: string | null, projectRoot: string | null = null): void => {
+      markdown.setAssetBase(dir, projectRoot);
     },
     focus,
     disconnect: (): void => {

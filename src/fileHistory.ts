@@ -72,3 +72,27 @@ export function goForward(
     },
   };
 }
+
+/**
+ * Replaces `from` with `to` on both stacks after a file rename and collapses
+ * adjacent duplicates the rename may create.
+ */
+export function renameInHistory(
+  history: FileHistory,
+  from: string,
+  to: string,
+): FileHistory {
+  return {
+    back: renameInStack(history.back, from, to),
+    forward: renameInStack(history.forward, from, to),
+  };
+}
+
+function renameInStack(
+  stack: readonly string[],
+  from: string,
+  to: string,
+): string[] {
+  const renamed = stack.map((path) => (path === from ? to : path));
+  return renamed.filter((path, index) => path !== renamed[index - 1]);
+}

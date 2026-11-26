@@ -86,3 +86,19 @@ describe("checkedParagraphNav", () => {
     expect(checkedParagraphNav(false)).toEqual({ paragraphNav: false });
   });
 });
+
+describe("tickTopsPx overflow", () => {
+  it("keeps every tick inside the inset when there are too many", () => {
+    const tops = tickTopsPx({
+      count: 400,
+      viewHeightPx: 600,
+      tickHeightPx: 2,
+      gapPx: 8,
+      insetPx: 12,
+    });
+    expect(tops).toHaveLength(400);
+    expect(tops[0]).toBe(12);
+    expect(tops[399]).toBeCloseTo(600 - 12 - 2);
+    expect(tops[1]! - tops[0]!).toBeGreaterThan(0);
+  });
+});

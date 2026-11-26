@@ -180,3 +180,16 @@ describe("typstHeadingPrefixRanges", () => {
     ]);
   });
 });
+
+describe("typst image paths", () => {
+  it("resolves a root-relative image against the project root", () => {
+    expect(
+      typstDecorationSpecs(parseTypst('#image("/art/a.png")'), {
+        showMarks: false,
+        projectRoot: "/vault",
+      }),
+    ).toEqual([
+      { kind: "image-widget", from: 0, to: 20, href: "/vault/art/a.png", alt: "" },
+    ]);
+  });
+});
