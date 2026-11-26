@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { displayOffsetToSource } from "./cellClick";
+import { DEFAULT_MARKDOWN_FEATURES, withMarkdownFeature } from "./features";
 import { caretSkippedGraphic } from "./graphicNav";
 
 describe("caretSkippedGraphic", () => {
@@ -25,5 +26,19 @@ describe("displayOffsetToSource", () => {
   it("maps past a closed mark onto the following display character", () => {
     expect(displayOffsetToSource("`ab` cd", 2)).toBe(4);
     expect(displayOffsetToSource("`ab` cd", 3)).toBe(5);
+  });
+
+  it("counts an image's alt text as displayed characters", () => {
+    expect(displayOffsetToSource("![pic](a.png) text", 1)).toBe(3);
+    expect(displayOffsetToSource("![pic](a.png) text", 4)).toBe(14);
+  });
+
+  it("maps with the features the cell was rendered with", () => {
+    const noStrong = withMarkdownFeature(
+      DEFAULT_MARKDOWN_FEATURES,
+      "strong",
+      false,
+    );
+    expect(displayOffsetToSource("**Delta**", 2, noStrong)).toBe(2);
   });
 });

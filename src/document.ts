@@ -9,7 +9,7 @@ import {
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AUTOSAVE_DELAY_MS, bindAutosave } from "./autosave";
+import { bindDebounce } from "./debounce";
 import {
   applyForgetRecent,
   applyNew,
@@ -19,8 +19,8 @@ import {
   applyRename,
   applySave,
   createDocumentSession,
+  diskChangeAction,
   isDirty,
-  shouldApplyDiskText,
   type DocumentSession,
 } from "./documentSession";
 import {
@@ -59,6 +59,13 @@ import {
   serializeStoredSession,
 } from "./storedSession";
 import { searchLines } from "./searchLines";
+import { isCaseOnlyRename } from "./caseRename";
+import {
+  detectLineEnding,
+  toLf,
+  withLineEnding,
+  type LineEnding,
+} from "./lineEndings";
 import {
   appendTypstInclude,
   collectTypstProjectFiles,
@@ -69,9 +76,18 @@ import {
   createFileHistory,
   goBack as hopBack,
   goForward as hopForward,
+  renameInHistory,
   recordVisit,
 } from "./fileHistory";
 import { openLocalPath } from "./openLocalPath";
+import {
+  isSafeProjectRelative,
+  isUnderRoot,
+  joinRoot,
+  normalizeFsPath,
+  parentDir,
+  relativeFromRoot,
+} from "./projectPath";
 import {
   isNotePath,
   isWikiAssetTarget,
@@ -79,11 +95,15 @@ import {
   wikiCreatePath,
 } from "./wikiLink";
 
+const AUTOSAVE_DELAY_MS = 800;
+const CARET_PERSIST_DELAY_MS = 400;
 const RECENT_STORAGE_KEY = "justpaper.recentFiles";
 const PROJECT_STORAGE_KEY = "justpaper.project";
-const SAVE_BUTTON = "Save";
-const DISCARD_BUTTON = "Don't Save";
-const CANCEL_BUTTON = "Cancel";
+const SAVE_BUTTON = "Speichern";
+const DISCARD_BUTTON = "Nicht speichern";
+const CANCEL_BUTTON = "Abbrechen";
+const RELOAD_BUTTON = "Neu laden";
+const KEEP_BUTTON = "Meine Version behalten";
 const FILE_FILTERS = [
   { name: "Markdown", extensions: ["md"] },
   { name: "Typst", extensions: ["typ"] },
@@ -95,6 +115,8 @@ const SEARCH_LIMIT = 200;
 export const MAX_DOCUMENT_BYTES = 5_000_000;
 
 class DocumentTooLargeError extends Error {}
+
+type WriteOrigin = "user" | "autosave";
 
 export type { SearchHit, ProjectNote };
 
@@ -173,73 +195,6 @@ function fileName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-function isUnderRoot(path: string, root: string): boolean {
-  const normalizedPath = normalizeFsPath(path);
-  const normalizedRoot = normalizeFsPath(root).replace(/\/+$/, "");
-  const caseInsensitive = /^[a-z]:(?:\/|$)/i.test(normalizedRoot);
-  const candidate = caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath;
-  const boundary = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
-  return candidate === boundary || candidate.startsWith(`${boundary}/`);
-}
-
-function joinRoot(root: string, relative: string): string {
-  return `${normalizeFsPath(root).replace(/\/+$/, "")}/${normalizeFsPath(relative).replace(/^\/+/, "")}`;
-}
-
-function relativeFromRoot(root: string, path: string): string | undefined {
-  const normalizedRoot = normalizeFsPath(root).replace(/\/+$/, "");
-  const normalizedPath = normalizeFsPath(path);
-  const prefix = `${normalizedRoot}/`;
-  const caseInsensitive = /^[a-z]:(?:\/|$)/i.test(normalizedRoot);
-  if (
-    !(caseInsensitive ? normalizedPath.toLowerCase() : normalizedPath).startsWith(
-      caseInsensitive ? prefix.toLowerCase() : prefix,
-    )
-  ) {
-    return undefined;
-  }
-  return normalizedPath.slice(prefix.length);
-}
-
-function parentDir(path: string): string | undefined {
-  const trimmed = normalizeFsPath(path).replace(/\/+$/, "");
-  const slash = trimmed.lastIndexOf("/");
-  if (slash <= 0) {
-    return undefined;
-  }
-  return trimmed.slice(0, slash);
-}
-
-function normalizeFsPath(path: string): string {
-  return path.replace(/\\/g, "/");
-}
-
-function isSafeProjectRelative(path: string): boolean {
-  const normalized = normalizeFsPath(path);
-  if (
-    normalized.length === 0 ||
-    normalized.startsWith("/") ||
-    /^[a-z]:/i.test(normalized)
-  ) {
-    return false;
-  }
-  let depth = 0;
-  for (const part of normalized.split("/")) {
-    if (part === "" || part === ".") {
-      continue;
-    }
-    if (part === "..") {
-      depth -= 1;
-      if (depth < 0) {
-        return false;
-      }
-      continue;
-    }
-    depth += 1;
-  }
-  return depth > 0;
-}
-
 async function readDocumentText(path: string): Promise<string> {
   const file = await openFsFile(path, { read: true });
   const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -262,6 +217,17 @@ async function readDocumentText(path: string): Promise<string> {
     }
   } finally {
     await file.close();
+  }
+}
+
+/**
+ * Reads a file as LF text for comparisons with the editor, or undefined on failure.
+ */
+async function readDiskText(path: string): Promise<string | undefined> {
+  try {
+    return toLf(await readDocumentText(path));
+  } catch {
+    return undefined;
   }
 }
 
@@ -310,6 +276,9 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
   let navigatingHistory = false;
   let documentGeneration = 0;
   let writeQueue = Promise.resolve();
+  let lineEnding: LineEnding = "\n";
+  let reportedSaveFailure: string | null = null;
+  let conflictPending = false;
   if (stored?.typstMain) {
     session = applyOpenTypstDocument(session, stored.typstMain);
   } else if (stored?.root) {
@@ -361,7 +330,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       for (const listener of sessionListeners) {
         listener();
       }
-      fileWatch.follow(session.projectRoot !== null ? session.path : null);
+      fileWatch.follow(session.path);
       if (
         previous.projectRoot !== session.projectRoot ||
         previous.typstMain !== session.typstMain
@@ -387,7 +356,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (!isTauriRuntime()) {
       return true;
     }
-    const choice = await message("Do you want to save the changes you made?", {
+    const choice = await message("Sollen die Änderungen gespeichert werden?", {
       title: "JustPaper",
       kind: "warning",
       buttons: {
@@ -402,17 +371,40 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return choice === DISCARD_BUTTON;
   };
 
-  const writeTo = (path: string): Promise<boolean> => {
+  /**
+   * Shows a save failure once per path for autosaves, so a broken disk does not
+   * pop a modal after every typing pause; explicit saves always report.
+   */
+  const reportSaveFailure = async (
+    path: string,
+    origin: WriteOrigin,
+  ): Promise<void> => {
+    if (origin === "autosave" && reportedSaveFailure === path) {
+      return;
+    }
+    reportedSaveFailure = path;
+    await showError(`„${fileName(path)}“ konnte nicht gespeichert werden.`);
+  };
+
+  /**
+   * Queues a write of the current editor text to `path` in the file's line ending.
+   */
+  const writeTo = (
+    path: string,
+    origin: WriteOrigin = "user",
+  ): Promise<boolean> => {
     const text = content.getText();
+    const fileText = withLineEnding(text, lineEnding);
     const sourcePath = session.path;
     const sourceGeneration = documentGeneration;
     const queued = writeQueue.then(async (): Promise<boolean> => {
       try {
-        await writeTextFile(path, text);
+        await writeTextFile(path, fileText);
       } catch {
-        await showError(`“${fileName(path)}” could not be saved.`);
+        await reportSaveFailure(path, origin);
         return false;
       }
+      reportedSaveFailure = null;
       if (
         session.path === sourcePath &&
         documentGeneration === sourceGeneration
@@ -451,39 +443,20 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     return writeTo(session.path);
   };
 
-  const autosave = bindAutosave(async () => {
-    if (session.projectRoot === null || session.path === null) {
+  const autosave = bindDebounce(async () => {
+    if (session.path === null || conflictPending) {
       return;
     }
     if (!isDirty(session, content.getText())) {
       return;
     }
-    await writeTo(session.path);
+    await writeTo(session.path, "autosave");
   }, AUTOSAVE_DELAY_MS);
 
   /**
-   * Reloads the open file from disk when the buffer is clean and the file changed.
+   * Replaces the buffer with a disk snapshot without touching undo-visible edits.
    */
-  const applyExternalChange = async (): Promise<void> => {
-    if (applying) {
-      return;
-    }
-    if (session.projectRoot === null || session.path === null) {
-      return;
-    }
-    const path = session.path;
-    let disk: string;
-    try {
-      disk = await readDocumentText(path);
-    } catch {
-      return;
-    }
-    if (session.path !== path) {
-      return;
-    }
-    if (!shouldApplyDiskText(content.getText(), session.lastSaved, disk)) {
-      return;
-    }
+  const reloadFromDisk = (path: string, disk: string): void => {
     const caret = content.getCaretOffset();
     const previous = session;
     session = applyOpen(session, path, disk);
@@ -492,6 +465,61 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     content.setCaretOffset(clampCaretOffset(caret, disk.length));
     applying = false;
     notify(previous);
+  };
+
+  /**
+   * Asks whether an external edit or the unsaved buffer wins; autosave pauses
+   * meanwhile so neither side is overwritten silently.
+   */
+  const resolveConflict = async (path: string): Promise<void> => {
+    conflictPending = true;
+    try {
+      const choice = await message(
+        `„${fileName(path)}“ wurde außerhalb von JustPaper geändert. Neu laden und die eigenen Änderungen verwerfen?`,
+        {
+          title: "JustPaper",
+          kind: "warning",
+          buttons: { ok: RELOAD_BUTTON, cancel: KEEP_BUTTON },
+        },
+      );
+      if (session.path !== path) {
+        return;
+      }
+      if (choice === RELOAD_BUTTON) {
+        const disk = await readDiskText(path);
+        if (disk !== undefined && session.path === path) {
+          reloadFromDisk(path, disk);
+        }
+        return;
+      }
+      await writeTo(path);
+    } finally {
+      conflictPending = false;
+    }
+  };
+
+  /**
+   * Reloads the open file when it changed on disk and the buffer is clean, or
+   * asks the user when both changed.
+   */
+  const applyExternalChange = async (): Promise<void> => {
+    if (applying || conflictPending) {
+      return;
+    }
+    if (session.path === null) {
+      return;
+    }
+    const path = session.path;
+    const disk = await readDiskText(path);
+    if (disk === undefined || session.path !== path) {
+      return;
+    }
+    const action = diskChangeAction(content.getText(), session.lastSaved, disk);
+    if (action === "reload") {
+      reloadFromDisk(path, disk);
+    } else if (action === "conflict") {
+      await resolveConflict(path);
+    }
   };
 
   const fileWatch = bindOpenFileWatch(
@@ -531,9 +559,9 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     path: string,
     caretLine?: number,
   ): Promise<boolean> => {
-    let text: string;
+    let raw: string;
     try {
-      text = await readDocumentText(path);
+      raw = await readDocumentText(path);
     } catch (error) {
       if (!(error instanceof DocumentTooLargeError)) {
         const previous = session;
@@ -542,13 +570,15 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       }
       const reason =
         error instanceof DocumentTooLargeError
-          ? `“${fileName(path)}” is larger than 5 MB.`
-          : `“${fileName(path)}” could not be opened.`;
+          ? `„${fileName(path)}“ ist größer als 5 MB.`
+          : `„${fileName(path)}“ konnte nicht geöffnet werden.`;
       await showError(reason);
       return false;
     }
+    const text = toLf(raw);
     const previous = session;
     documentGeneration += 1;
+    lineEnding = detectLineEnding(raw);
     session = applyOpen(session, path, text);
     applying = true;
     content.setText(text, caretLine, true);
@@ -620,6 +650,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     const previous = session;
     documentGeneration += 1;
+    lineEnding = "\n";
     session = applyNew(session);
     applying = true;
     content.setText("", undefined, true);
@@ -668,6 +699,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     session = applyOpenFolder(session, root);
     if (session.path !== null && !isUnderRoot(session.path, root)) {
       documentGeneration += 1;
+      lineEnding = "\n";
       session = applyNew(session);
       applying = true;
       content.setText("", undefined, true);
@@ -719,7 +751,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
           return false;
         }
         if (await exists(dest)) {
-          await showError(`“${fileName(dest)}” already exists.`);
+          await showError(`„${fileName(dest)}“ existiert bereits.`);
           return false;
         }
         const saved = await writeTo(dest);
@@ -741,18 +773,19 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (dest === session.path) {
       return true;
     }
-    if (await exists(dest)) {
-      await showError(`“${fileName(dest)}” already exists.`);
+    if (!isCaseOnlyRename(session.path, dest) && (await exists(dest))) {
+      await showError(`„${fileName(dest)}“ existiert bereits.`);
       return false;
     }
     await autosave.flush();
     try {
       await rename(session.path, dest);
     } catch {
-      await showError(`“${displayName(session.path)}” could not be renamed.`);
+      await showError(`„${displayName(session.path)}“ konnte nicht umbenannt werden.`);
       return false;
     }
     carets = renameCaret(carets, session.path, dest);
+    history = renameInHistory(history, session.path, dest);
     const previous = session;
     session = applyRename(session, dest);
     notify(previous);
@@ -771,12 +804,12 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       return;
     }
     if (!isSafeProjectRelative(relativePath)) {
-      await showError("The selected file is outside the project.");
+      await showError("Die gewählte Datei liegt außerhalb des Projekts.");
       return;
     }
     const dest = joinRoot(session.projectRoot, relativePath);
     if (!(await isContainedDestination(session.projectRoot, dest))) {
-      await showError("The selected file is outside the project.");
+      await showError("Die gewählte Datei liegt außerhalb des Projekts.");
       return;
     }
     if (session.typstMain !== null && !(await exists(dest))) {
@@ -803,11 +836,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (session.path === abs) {
       return content.getText();
     }
-    try {
-      return await readDocumentText(abs);
-    } catch {
-      return undefined;
-    }
+    return readDiskText(abs);
   };
 
   const listTypstGraph = async (): Promise<string[]> => {
@@ -830,14 +859,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       try {
         await mkdir(parent, { recursive: true });
       } catch {
-        await showError(`“${fileName(dest)}” could not be created.`);
+        await showError(`„${fileName(dest)}“ konnte nicht angelegt werden.`);
         return false;
       }
     }
     try {
       await writeTextFile(dest, "");
     } catch {
-      await showError(`“${fileName(dest)}” could not be created.`);
+      await showError(`„${fileName(dest)}“ konnte nicht angelegt werden.`);
       return false;
     }
     return true;
@@ -854,20 +883,21 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     if (newRelative === undefined || mainRelative === undefined) {
       return;
     }
-    let text: string;
+    let raw: string;
     try {
-      text = await readDocumentText(main);
+      raw = await readDocumentText(main);
     } catch {
       return;
     }
+    const text = toLf(raw);
     const next = appendTypstInclude(text, mainRelative, newRelative);
     if (next === text) {
       return;
     }
     try {
-      await writeTextFile(main, next);
+      await writeTextFile(main, withLineEnding(next, detectLineEnding(raw)));
     } catch {
-      await showError(`“${fileName(main)}” could not be saved.`);
+      await showError(`„${fileName(main)}“ konnte nicht gespeichert werden.`);
     }
   };
 
@@ -950,13 +980,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       }
       return readProjectNotes(root);
     },
-    readFile: async (path) => {
-      try {
-        return await readDocumentText(path);
-      } catch {
-        return null;
-      }
-    },
+    readFile: async (path) => (await readDiskText(path)) ?? null,
     startWatch: async (root, onEvent) => {
       if (!isTauriRuntime()) {
         return () => {};
@@ -1019,7 +1043,7 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     }
     const dest = joinRoot(session.projectRoot, resolved);
     if (!(await isContainedDestination(session.projectRoot, dest))) {
-      await showError("The include points outside the project.");
+      await showError("Das Include zeigt aus dem Projekt heraus.");
       return;
     }
     await autosave.flush();
@@ -1029,6 +1053,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     await switchTo(dest);
   };
 
+  /**
+   * Returns the open note's project-relative path, used to prefer nearby wiki targets.
+   */
+  const currentRelative = (): string | undefined =>
+    session.projectRoot === null || session.path === null
+      ? undefined
+      : relativeFromRoot(session.projectRoot, session.path);
+
   const followWiki = async (target: string): Promise<void> => {
     if (session.projectRoot === null) {
       return;
@@ -1036,18 +1068,18 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
     await autosave.flush();
     const files = await listFiles();
     const assets = await listAssets();
-    const relative = resolveWikiLink(target, files, assets);
+    const relative = resolveWikiLink(target, files, assets, currentRelative());
     if (relative !== undefined) {
       const dest = joinRoot(session.projectRoot, relative);
       if (!(await isContainedDestination(session.projectRoot, dest))) {
-        await showError("The wiki link points outside the project.");
+        await showError("Der Wiki-Link zeigt aus dem Projekt heraus.");
         return;
       }
       if (!isNotePath(relative)) {
         try {
           await openLocalPath(dest);
         } catch {
-          await showError(`“${fileName(dest)}” could not be opened.`);
+          await showError(`„${fileName(dest)}“ konnte nicht geöffnet werden.`);
         }
         return;
       }
@@ -1055,16 +1087,16 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       return;
     }
     if (isWikiAssetTarget(target)) {
-      await showError(`“${fileName(target)}” could not be opened.`);
+      await showError(`„${fileName(target)}“ konnte nicht geöffnet werden.`);
       return;
     }
     const dest = wikiCreatePath(target, session.projectRoot, session.path);
     if (dest === undefined) {
-      await showError("The wiki link points outside the project.");
+      await showError("Der Wiki-Link zeigt aus dem Projekt heraus.");
       return;
     }
     if (!(await isContainedDestination(session.projectRoot, dest))) {
-      await showError("The wiki link points outside the project.");
+      await showError("Der Wiki-Link zeigt aus dem Projekt heraus.");
       return;
     }
     if (await exists(dest)) {
@@ -1076,14 +1108,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       try {
         await mkdir(parent, { recursive: true });
       } catch {
-        await showError(`“${fileName(dest)}” could not be created.`);
+        await showError(`„${fileName(dest)}“ konnte nicht angelegt werden.`);
         return;
       }
     }
     try {
       await writeTextFile(dest, "");
     } catch {
-      await showError(`“${fileName(dest)}” could not be created.`);
+      await showError(`„${fileName(dest)}“ konnte nicht angelegt werden.`);
       return;
     }
     await switchTo(dest);
@@ -1094,14 +1126,14 @@ export function bindDocument(content: DocumentContent): DocumentBinding {
       return;
     }
     indexOpenFile();
-    if (session.projectRoot === null || session.path === null) {
+    if (session.path === null) {
       return;
     }
     autosave.schedule();
   });
-  const caretPersist = bindAutosave(() => {
+  const caretPersist = bindDebounce(() => {
     persistSession();
-  }, 400);
+  }, CARET_PERSIST_DELAY_MS);
   const stopCaret = content.onCaretOrDoc(() => {
     if (applying) {
       return;

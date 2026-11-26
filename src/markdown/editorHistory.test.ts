@@ -1,7 +1,7 @@
 import { history, undo, undoDepth } from "@codemirror/commands";
 import { Compartment, EditorState, type TransactionSpec } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { replaceDocumentWithFreshHistory } from "./editor";
+import { replaceDocumentWithFreshHistory } from "./documentLoad";
 
 function stateTarget(initial: string) {
   const historyCompartment = new Compartment();

@@ -55,7 +55,7 @@ function nextFileName(
   if (!isValidBaseName(typed)) {
     return undefined;
   }
-  if (hasExtension(typed)) {
+  if (hasFileExtension(typed)) {
     return typed;
   }
   return `${typed}${extensionOf(currentPath)}`;
@@ -71,9 +71,21 @@ function isValidBaseName(name: string): boolean {
   return !name.includes("/") && !name.includes("\\");
 }
 
-function hasExtension(name: string): boolean {
+const FILE_EXTENSION = /^[a-z0-9]{1,5}$/i;
+const HAS_LETTER = /[a-z]/i;
+
+/**
+ * Returns whether `name` ends in a plausible file extension: one to five
+ * alphanumeric characters with at least one letter after the last dot.
+ * Dotted names such as "v1.2", "Dr. Smith" or "Meeting 2024.05.01" do not.
+ */
+export function hasFileExtension(name: string): boolean {
   const dot = name.lastIndexOf(".");
-  return dot > 0 && dot < name.length - 1;
+  if (dot <= 0) {
+    return false;
+  }
+  const suffix = name.slice(dot + 1);
+  return FILE_EXTENSION.test(suffix) && HAS_LETTER.test(suffix);
 }
 
 function extensionOf(path: string): string {

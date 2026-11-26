@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   incomingWikiLinks,
+  isWikiAssetTarget,
   outgoingWikiLinks,
   parseWikiLink,
   resolveWikiLink,
@@ -218,6 +219,101 @@ describe("incomingWikiLinks", () => {
       incomingWikiLinks("Hello.md", [
         { path: "Other.md", content: "[[Note]]" },
       ], files),
+    ).toEqual([]);
+  });
+});
+
+describe("dotted wiki targets", () => {
+  it("treats version and date names as notes, not assets", () => {
+    expect(isWikiAssetTarget("v1.2")).toBe(false);
+    expect(isWikiAssetTarget("Meeting 2024.05.01")).toBe(false);
+    expect(isWikiAssetTarget("Dr. Smith")).toBe(false);
+    expect(isWikiAssetTarget("scan.pdf")).toBe(true);
+  });
+
+  it("creates markdown notes for dotted names", () => {
+    expect(wikiCreatePath("v1.2", "/vault", null)).toBe("/vault/v1.2.md");
+    expect(wikiCreatePath("Meeting 2024.05.01", "/vault", null)).toBe(
+      "/vault/Meeting 2024.05.01.md",
+    );
+    expect(wikiCreatePath("scan.pdf", "/vault", null)).toBe("/vault/scan.pdf");
+  });
+
+  it("resolves a dotted note name and does not strip its last segment", () => {
+    expect(resolveWikiLink("v1.2", ["v1.2.md"])).toBe("v1.2.md");
+    expect(resolveWikiLink("v1.2", [], ["v1.pdf"])).toBeUndefined();
+  });
+});
+
+describe("resolveWikiLink from a note", () => {
+  const files = ["A.md", "projects/x/A.md", "projects/x/Note.md"];
+
+  it("prefers a same-folder match over a shorter path", () => {
+    expect(resolveWikiLink("A", files, [], "projects/x/Note.md")).toBe(
+      "projects/x/A.md",
+    );
+  });
+
+  it("falls back to the shortest path without a same-folder match", () => {
+    expect(resolveWikiLink("A", files, [], "other/Note.md")).toBe("A.md");
+    expect(resolveWikiLink("A", files)).toBe("A.md");
+  });
+
+  it("uses the linking note's folder for incoming links", () => {
+    expect(
+      incomingWikiLinks(
+        "projects/x/A.md",
+        [
+          { path: "projects/x/Note.md", content: "[[A]]" },
+          { path: "Root.md", content: "[[A]]" },
+        ],
+        files,
+      ).map((hit) => hit.path),
+    ).toEqual(["projects/x/Note.md"]);
+  });
+
+  it("uses the current note's folder for outgoing links", () => {
+    expect(
+      outgoingWikiLinks("[[A]]", files, [], "projects/x/Note.md")[0]?.path,
+    ).toBe("projects/x/A.md");
+  });
+});
+
+describe("wiki links in code", () => {
+  it("ignores links inside inline code spans", () => {
+    expect(wikiLinksIn("`[[Hidden]]` and [[Shown]]").map((l) => l.target)).toEqual([
+      "Shown",
+    ]);
+  });
+
+  it("ignores links inside double-backtick spans", () => {
+    expect(wikiLinksIn("``a ` [[Hidden]]`` [[Shown]]").map((l) => l.target)).toEqual([
+      "Shown",
+    ]);
+  });
+
+  it("ignores links inside fenced code blocks", () => {
+    const source = "[[One]]\n```\n[[Hidden]]\n```\n[[Two]]";
+    expect(wikiLinksIn(source).map((l) => l.target)).toEqual(["One", "Two"]);
+  });
+
+  it("keeps links after an unmatched backtick", () => {
+    expect(wikiLinksIn("a ` b [[Shown]]").map((l) => l.target)).toEqual([
+      "Shown",
+    ]);
+  });
+
+  it("does not report a code link at the caret", () => {
+    expect(wikiLinkAt("`[[Hidden]]`", 4)).toBeUndefined();
+  });
+
+  it("skips code links for incoming links", () => {
+    expect(
+      incomingWikiLinks(
+        "A.md",
+        [{ path: "B.md", content: "```\n[[A]]\n```" }],
+        ["A.md", "B.md"],
+      ),
     ).toEqual([]);
   });
 });

@@ -97,6 +97,17 @@ export function bindWindowChrome(
 }
 
 /**
+ * Asks the current window to close; the document binding intercepts the request
+ * to save or confirm unsaved changes first.
+ */
+export function requestWindowClose(): void {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  void getCurrentWindow().close();
+}
+
+/**
  * Wires traffic lights / Windows caption buttons to the current Tauri window.
  */
 export function bindTrafficLights(buttons: {
@@ -110,9 +121,7 @@ export function bindTrafficLights(buttons: {
 
   const appWindow = getCurrentWindow();
   const windows = isWindowsChrome();
-  const onClose = (): void => {
-    void appWindow.close();
-  };
+  const onClose = requestWindowClose;
   const onMinimize = (): void => {
     void appWindow.minimize();
   };

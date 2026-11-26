@@ -128,3 +128,32 @@ describe("fuzzyMatchNotes", () => {
     ]);
   });
 });
+
+describe("fuzzyMatch ranking", () => {
+  it("ranks basename-prefix matches above inner matches", () => {
+    expect(fuzzyMatch(["lab.md", "about.md", "Abstract.md"], "ab")).toEqual([
+      "about.md",
+      "Abstract.md",
+      "lab.md",
+    ]);
+  });
+
+  it("ranks word-boundary matches above inner matches", () => {
+    expect(fuzzyMatch(["xnotes.md", "my-notes.md"], "notes")).toEqual([
+      "my-notes.md",
+      "xnotes.md",
+    ]);
+  });
+
+  it("requires every whitespace-separated token to match", () => {
+    expect(
+      fuzzyMatch(["notes/meeting.md", "meeting.md", "notes/todo.md"], "meeting notes"),
+    ).toEqual(["notes/meeting.md"]);
+  });
+
+  it("applies tokens to note paths too", () => {
+    expect(
+      fuzzyMatchNotes([{ path: "notes/meeting.md" }, { path: "meeting.md" }], "meeting notes"),
+    ).toEqual([{ path: "notes/meeting.md", matchedTags: [] }]);
+  });
+});

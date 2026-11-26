@@ -22,16 +22,22 @@ export function isDirty(session: DocumentSession, currentText: string): boolean 
   return currentText !== session.lastSaved;
 }
 
+export type DiskChangeAction = "ignore" | "reload" | "conflict";
+
 /**
- * Returns whether an external disk snapshot should replace the editor.
- * Skips when the buffer is already in sync or still has unsaved edits.
+ * Decides how to react to a new disk snapshot of the open file: reload a clean
+ * buffer, ignore snapshots we already know, and flag a conflict when both the
+ * buffer and the file changed since the last save.
  */
-export function shouldApplyDiskText(
+export function diskChangeAction(
   editorText: string,
   lastSaved: string,
   diskText: string,
-): boolean {
-  return diskText !== editorText && editorText === lastSaved;
+): DiskChangeAction {
+  if (diskText === editorText || diskText === lastSaved) {
+    return "ignore";
+  }
+  return editorText === lastSaved ? "reload" : "conflict";
 }
 
 /**

@@ -345,6 +345,14 @@
   margin-block: 0.4em;
 }
 
+.md-image-frame {
+  display: block;
+}
+
+.md-image-frame.is-broken {
+  display: inline;
+}
+
 .md-image-fallback {
   color: color-mix(in srgb, var(--ink) 55%, transparent);
   font-style: italic;
@@ -364,6 +372,10 @@
   background: transparent;
   cursor: pointer;
   color: var(--paper);
+}
+
+.md-todo-box[aria-readonly="true"] {
+  cursor: default;
 }
 
 .md-todo-box.is-checked {

@@ -20,7 +20,8 @@ export type TickLayout = {
 
 /**
  * Returns the top offset of each equally spaced tick, centered in the view.
- * Overflow compresses the gap evenly, never below zero.
+ * Overflow compresses the gap evenly; when even touching ticks overflow, the
+ * stride shrinks so every tick stays within the insets.
  */
 export function tickTopsPx(layout: TickLayout): number[] {
   const { count, viewHeightPx, tickHeightPx, insetPx } = layout;
@@ -29,6 +30,9 @@ export function tickTopsPx(layout: TickLayout): number[] {
   }
 
   const availablePx = Math.max(0, viewHeightPx - 2 * insetPx);
+  if (count > 1 && count * tickHeightPx > availablePx) {
+    return overlappingTickTopsPx(count, availablePx, tickHeightPx, insetPx);
+  }
   let gapPx = layout.gapPx;
   const preferredPx = count * tickHeightPx + Math.max(0, count - 1) * gapPx;
   if (count > 1 && preferredPx > availablePx) {
@@ -39,6 +43,16 @@ export function tickTopsPx(layout: TickLayout): number[] {
   const startPx = (viewHeightPx - clusterPx) / 2;
   const stridePx = tickHeightPx + gapPx;
   return Array.from({ length: count }, (_, index) => startPx + index * stridePx);
+}
+
+function overlappingTickTopsPx(
+  count: number,
+  availablePx: number,
+  tickHeightPx: number,
+  insetPx: number,
+): number[] {
+  const stridePx = Math.max(0, availablePx - tickHeightPx) / (count - 1);
+  return Array.from({ length: count }, (_, index) => insetPx + index * stridePx);
 }
 
 /**
@@ -91,9 +105,11 @@ export function bindParagraphNav(
   let pointer: { x: number; y: number } | undefined;
   let pointerOffset: number | undefined;
   let followPointer = false;
+  let paintedKey: string | undefined;
 
   const paint = (): void => {
     if (!enabled) {
+      paintedKey = undefined;
       host.hidden = true;
       host.replaceChildren();
       return;
@@ -107,6 +123,11 @@ export function bindParagraphNav(
       surface.getCaretOffset(),
       pointerOffset,
     );
+    const key = tickRenderKey(ranges.length, active, host.clientHeight);
+    if (key === paintedKey) {
+      return;
+    }
+    paintedKey = key;
     const tops = tickTopsPx({
       count: ranges.length,
       viewHeightPx: host.clientHeight,
@@ -219,6 +240,17 @@ export function bindParagraphNav(
       document.removeEventListener("wheel", onWheel, true);
     },
   };
+}
+
+/**
+ * Identifies a tick rendering; the DOM is rebuilt only when it changes.
+ */
+function tickRenderKey(
+  count: number,
+  active: number,
+  viewHeightPx: number,
+): string {
+  return `${count}:${active}:${viewHeightPx}`;
 }
 
 function tickButton(

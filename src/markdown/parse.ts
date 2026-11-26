@@ -449,8 +449,11 @@ function matchInlineMark(
     if (afterOpen >= to) {
       return undefined;
     }
-    const closeFrom = source.indexOf(mark, afterOpen);
-    if (closeFrom === -1 || closeFrom >= to) {
+    const closeFrom =
+      kind === "code"
+        ? closingCodeMark(source, afterOpen, to)
+        : closingEmphasisMark(source, mark, afterOpen, to);
+    if (closeFrom === undefined) {
       return undefined;
     }
     const children =
@@ -467,6 +470,46 @@ function matchInlineMark(
     };
   }
   return undefined;
+}
+
+/**
+ * Finds the closing backtick of an inline code span inside `[afterOpen, to)`.
+ */
+function closingCodeMark(
+  source: string,
+  afterOpen: number,
+  to: number,
+): number | undefined {
+  const closeFrom = source.indexOf("`", afterOpen);
+  return closeFrom === -1 || closeFrom >= to ? undefined : closeFrom;
+}
+
+/**
+ * Finds the closing `*` / `**` run using flanking rules: the opener must be
+ * followed by non-whitespace and the closer preceded by non-whitespace, so
+ * bullets (`* item`) and arithmetic (`2 * 3`) never become emphasis.
+ */
+function closingEmphasisMark(
+  source: string,
+  mark: string,
+  afterOpen: number,
+  to: number,
+): number | undefined {
+  if (isWhitespace(source[afterOpen])) {
+    return undefined;
+  }
+  let closeFrom = source.indexOf(mark, afterOpen);
+  while (closeFrom !== -1 && closeFrom < to) {
+    if (!isWhitespace(source[closeFrom - 1])) {
+      return closeFrom;
+    }
+    closeFrom = source.indexOf(mark, closeFrom + 1);
+  }
+  return undefined;
+}
+
+function isWhitespace(char: string | undefined): boolean {
+  return char === undefined || /\s/.test(char);
 }
 
 function featureEnabled(

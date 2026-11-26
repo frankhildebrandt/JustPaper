@@ -4,6 +4,7 @@ import {
   goBack,
   goForward,
   recordVisit,
+  renameInHistory,
 } from "./fileHistory";
 
 describe("recordVisit", () => {
@@ -60,5 +61,32 @@ describe("goForward", () => {
 
   it("returns undefined when forward is empty", () => {
     expect(goForward(createFileHistory(), "/a.md")).toBeUndefined();
+  });
+});
+
+describe("renameInHistory", () => {
+  it("maps renamed entries on both stacks", () => {
+    expect(
+      renameInHistory(
+        { back: ["/a.md", "/old.md"], forward: ["/old.md", "/c.md"] },
+        "/old.md",
+        "/new.md",
+      ),
+    ).toEqual({ back: ["/a.md", "/new.md"], forward: ["/new.md", "/c.md"] });
+  });
+
+  it("collapses adjacent duplicates created by the rename", () => {
+    expect(
+      renameInHistory(
+        { back: ["/new.md", "/old.md", "/b.md"], forward: [] },
+        "/old.md",
+        "/new.md",
+      ),
+    ).toEqual({ back: ["/new.md", "/b.md"], forward: [] });
+  });
+
+  it("returns an equal history when nothing matches", () => {
+    const history = { back: ["/a.md"], forward: ["/b.md"] };
+    expect(renameInHistory(history, "/x.md", "/y.md")).toEqual(history);
   });
 });

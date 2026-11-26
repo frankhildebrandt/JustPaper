@@ -60,3 +60,29 @@ describe("completedWikiLink", () => {
     expect(completedWikiLink("Notes/Hello")).toBe("[[Notes/Hello]]");
   });
 });
+
+describe("openWikiQuery across lines", () => {
+  it("ignores a closing ]] that belongs to a later link", () => {
+    expect(openWikiQuery("see [[No\nlater [[Other]]", 8)).toEqual({
+      from: 4,
+      query: "No",
+    });
+  });
+
+  it("ignores a closing ]] after the next [[ on the same line", () => {
+    const source = "[[Ne [[Other]]";
+    expect(openWikiQuery(source, 4)).toEqual({ from: 0, query: "Ne" });
+  });
+
+  it("rejects a query spanning lines", () => {
+    expect(openWikiQuery("[[Note\nmore", 11)).toBeUndefined();
+  });
+
+  it("rejects a caret after a closed link on the same line", () => {
+    expect(openWikiQuery("[[Note]] more", 13)).toBeUndefined();
+  });
+
+  it("strips a typst extension for insertion", () => {
+    expect(wikiInsertTarget("chapters/Intro.typ")).toBe("chapters/Intro");
+  });
+});

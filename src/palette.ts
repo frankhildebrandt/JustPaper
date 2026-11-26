@@ -1,5 +1,9 @@
+import { bindDebounce } from "./debounce";
 import { linesPerPage } from "./caret";
 import { renderTagBadges } from "./tagBadge";
+
+export const PALETTE_QUERY_DELAY_MS = 150;
+const LOAD_ERROR_TEXT = "Ergebnisse konnten nicht geladen werden.";
 
 export type PaletteItem = {
   id: string;
@@ -18,6 +22,14 @@ export type PaletteOpenOptions = {
   placeholder: string;
   load: (query: string) => Promise<PaletteItem[]> | PaletteItem[];
   onPick: (item: PaletteItem) => void;
+  /** Shown in the results area when `load` returns no items. */
+  emptyText?: string;
+};
+
+export type PaletteStatus = {
+  itemCount: number;
+  failed: boolean;
+  emptyText?: string;
 };
 
 /**
@@ -37,6 +49,35 @@ export function indexAfterPage(
 }
 
 /**
+ * Returns the active index after new results arrive: the first item for a
+ * changed query, otherwise the previous index clamped to the list.
+ */
+export function activeAfterLoad(
+  active: number,
+  itemCount: number,
+  queryChanged: boolean,
+): number {
+  if (itemCount === 0 || queryChanged) {
+    return 0;
+  }
+  return Math.min(active, itemCount - 1);
+}
+
+/**
+ * Returns the German status line for the results area, or undefined when
+ * the item list speaks for itself.
+ */
+export function paletteStatusText(status: PaletteStatus): string | undefined {
+  if (status.failed) {
+    return LOAD_ERROR_TEXT;
+  }
+  if (status.itemCount === 0) {
+    return status.emptyText;
+  }
+  return undefined;
+}
+
+/**
  * Returns how many palette items Page Up/Down should skip, overlapping one.
  */
 function resultsPageSize(results: HTMLElement): number {
@@ -49,7 +90,54 @@ function resultsPageSize(results: HTMLElement): number {
 }
 
 /**
+ * Builds one result row; `onPick` runs on mouse down so focus stays put.
+ */
+function itemRow(
+  item: PaletteItem,
+  active: boolean,
+  onPick: (item: PaletteItem) => void,
+): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "palette-item";
+  li.classList.toggle("is-active", active);
+  const title = document.createElement("span");
+  title.className = "palette-item-title";
+  title.textContent = item.title;
+  li.append(title);
+  if (item.tags && item.tags.length > 0) {
+    const badges = document.createElement("span");
+    badges.className = "tag-badges";
+    renderTagBadges(badges, item.tags);
+    li.append(badges);
+  }
+  if (item.detail) {
+    const detail = document.createElement("span");
+    detail.className = "palette-item-detail";
+    detail.textContent = item.detail;
+    li.append(detail);
+  }
+  li.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+    onPick(item);
+  });
+  return li;
+}
+
+/**
+ * Builds the non-selectable status row for errors and empty results.
+ */
+function statusRow(text: string): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = "palette-status";
+  li.setAttribute("role", "status");
+  li.textContent = text;
+  return li;
+}
+
+/**
  * Binds a paper overlay that filters items from a query and picks with Enter.
+ * Typing refreshes after a short pause, Escape or leaving the palette closes
+ * it, and Escape returns focus to where it was before opening.
  */
 export function bindPalette(
   root: HTMLElement,
@@ -58,45 +146,38 @@ export function bindPalette(
 ): PaletteBinding {
   let active = 0;
   let items: PaletteItem[] = [];
+  let failed = false;
+  let loadedQuery = "";
   let session: PaletteOpenOptions | undefined;
   let request = 0;
+  let returnFocus: HTMLElement | undefined;
 
-  const close = (): void => {
+  const typing = bindDebounce(() => refresh(), PALETTE_QUERY_DELAY_MS);
+
+  const close = (restoreFocus = true): void => {
+    const wasOpen = !root.hidden;
+    typing.cancel();
     session = undefined;
     items = [];
+    failed = false;
     root.hidden = true;
     queryInput.value = "";
     results.replaceChildren();
+    const target = returnFocus;
+    returnFocus = undefined;
+    if (wasOpen && restoreFocus && target?.isConnected) {
+      target.focus({ preventScroll: true });
+    }
   };
 
   const render = (): void => {
-    results.replaceChildren();
-    items.forEach((item, index) => {
-      const li = document.createElement("li");
-      li.className = "palette-item";
-      li.classList.toggle("is-active", index === active);
-      const title = document.createElement("span");
-      title.className = "palette-item-title";
-      title.textContent = item.title;
-      li.append(title);
-      if (item.tags && item.tags.length > 0) {
-        const badges = document.createElement("span");
-        badges.className = "tag-badges";
-        renderTagBadges(badges, item.tags);
-        li.append(badges);
-      }
-      if (item.detail) {
-        const detail = document.createElement("span");
-        detail.className = "palette-item-detail";
-        detail.textContent = item.detail;
-        li.append(detail);
-      }
-      li.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        pick(item);
-      });
-      results.append(li);
+    const status = paletteStatusText({
+      itemCount: items.length,
+      failed,
+      emptyText: session?.emptyText,
     });
+    const rows = items.map((item, index) => itemRow(item, index === active, pick));
+    results.replaceChildren(...(status === undefined ? rows : [statusRow(status)]));
     const selected = results.children[active];
     if (selected instanceof HTMLElement) {
       selected.scrollIntoView({ block: "nearest" });
@@ -109,28 +190,47 @@ export function bindPalette(
     current?.onPick(item);
   };
 
+  const showResults = (next: PaletteItem[], query: string, loadFailed: boolean): void => {
+    items = next;
+    failed = loadFailed;
+    active = activeAfterLoad(active, items.length, query !== loadedQuery);
+    loadedQuery = query;
+    render();
+  };
+
   const refresh = async (): Promise<void> => {
     if (!session) {
       return;
     }
     const current = session;
     const id = ++request;
-    let next: PaletteItem[];
+    const query = queryInput.value;
+    const isCurrent = (): boolean => id === request && session === current;
     try {
-      next = await current.load(queryInput.value);
-    } catch {
-      if (id === request && session === current) {
-        items = [];
-        active = 0;
-        render();
+      const next = await current.load(query);
+      if (isCurrent()) {
+        showResults(next, query, false);
       }
+    } catch {
+      if (isCurrent()) {
+        showResults([], query, true);
+      }
+    }
+  };
+
+  const pickActive = async (): Promise<void> => {
+    await typing.flush();
+    const item = items[active];
+    if (item) {
+      pick(item);
+    }
+  };
+
+  const moveActive = (next: number): void => {
+    if (items.length === 0) {
       return;
     }
-    if (id !== request || session !== current) {
-      return;
-    }
-    items = next;
-    active = items.length === 0 ? 0 : Math.min(active, items.length - 1);
+    active = next;
     render();
   };
 
@@ -146,74 +246,104 @@ export function bindPalette(
     if (root.hidden) {
       return;
     }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (items.length === 0) {
+    const count = items.length;
+    switch (event.key) {
+      case "Escape":
+        event.preventDefault();
+        close();
         return;
-      }
-      active = (active + 1) % items.length;
-      render();
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (items.length === 0) {
+      case "ArrowDown":
+        event.preventDefault();
+        moveActive((active + 1) % Math.max(count, 1));
         return;
-      }
-      active = (active - 1 + items.length) % items.length;
-      render();
-      return;
-    }
-    if (event.key === "PageDown" || event.key === "PageUp") {
-      event.preventDefault();
-      if (items.length === 0) {
+      case "ArrowUp":
+        event.preventDefault();
+        moveActive((active - 1 + count) % Math.max(count, 1));
         return;
-      }
-      const direction = event.key === "PageDown" ? 1 : -1;
-      active = indexAfterPage(
-        active,
-        items.length,
-        direction,
-        resultsPageSize(results),
-      );
-      render();
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const item = items[active];
-      if (item) {
-        pick(item);
-      }
+      case "PageDown":
+      case "PageUp":
+        event.preventDefault();
+        moveActive(
+          indexAfterPage(
+            active,
+            count,
+            event.key === "PageDown" ? 1 : -1,
+            resultsPageSize(results),
+          ),
+        );
+        return;
+      case "Enter":
+        event.preventDefault();
+        void pickActive();
     }
   };
 
-  queryInput.addEventListener("input", () => {
-    void refresh();
-  });
+  const onInput = (): void => {
+    typing.schedule();
+  };
+
+  const onRootMouseDown = (event: MouseEvent): void => {
+    if (event.target !== queryInput) {
+      event.preventDefault();
+    }
+  };
+
+  const onFocusOut = (event: FocusEvent): void => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && root.contains(next)) {
+      return;
+    }
+    if (next instanceof HTMLElement) {
+      close(false);
+    }
+  };
+
+  const onDocumentPointerDown = (event: PointerEvent): void => {
+    if (root.hidden || root.contains(event.target as Node)) {
+      return;
+    }
+    close();
+  };
+
+  queryInput.addEventListener("input", onInput);
   queryInput.addEventListener("keydown", onKeyDown);
   root.addEventListener("wheel", onWheel, { passive: true });
+  root.addEventListener("mousedown", onRootMouseDown);
+  root.addEventListener("focusout", onFocusOut);
+  document.addEventListener("pointerdown", onDocumentPointerDown, true);
 
   return {
     open: (options: PaletteOpenOptions): void => {
+      if (root.hidden) {
+        returnFocus = focusedElement();
+      }
+      typing.cancel();
       session = options;
       active = 0;
+      failed = false;
+      loadedQuery = "";
       queryInput.placeholder = options.placeholder;
       queryInput.value = "";
       root.hidden = false;
       queryInput.focus();
       void refresh();
     },
-    close,
+    close: (): void => close(),
     disconnect: (): void => {
+      queryInput.removeEventListener("input", onInput);
       queryInput.removeEventListener("keydown", onKeyDown);
       root.removeEventListener("wheel", onWheel);
-      close();
+      root.removeEventListener("mousedown", onRootMouseDown);
+      root.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+      close(false);
     },
   };
+}
+
+function focusedElement(): HTMLElement | undefined {
+  const element = document.activeElement;
+  return element instanceof HTMLElement && element !== document.body
+    ? element
+    : undefined;
 }

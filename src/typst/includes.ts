@@ -1,5 +1,6 @@
 import { lineAtOffset } from "../caret";
 import { parseTypst, type HashSpan, type InlineSpan } from "./parse";
+import { isProjectRootPath, normalizeProjectPath } from "./projectPath";
 
 export type TypstInclude = {
   path: string;
@@ -66,15 +67,18 @@ export function typstIncludeAt(
 
 /**
  * Resolves an include path relative to the including file, or undefined if it
- * leaves the project root.
+ * leaves the project root. A leading "/" starts at the project root, as in Typst.
  */
 export function resolveTypstInclude(
   fromRelative: string,
   includePath: string,
 ): string | undefined {
   const trimmed = includePath.replace(/\\/g, "/").trim();
-  if (trimmed.length === 0 || trimmed.startsWith("/") || isWindowsAbsolute(trimmed)) {
+  if (trimmed.length === 0 || isWindowsAbsolute(trimmed)) {
     return undefined;
+  }
+  if (isProjectRootPath(trimmed)) {
+    return normalizeProjectPath(trimmed);
   }
   const fromDir = posixDirname(fromRelative);
   const joined = fromDir === "" ? trimmed : `${fromDir}/${trimmed}`;
@@ -262,27 +266,6 @@ function posixDirname(relative: string): string {
     return "";
   }
   return relative.slice(0, slash);
-}
-
-function normalizeProjectPath(path: string): string | undefined {
-  const parts: string[] = [];
-  for (const part of path.split("/")) {
-    if (part === "" || part === ".") {
-      continue;
-    }
-    if (part === "..") {
-      if (parts.length === 0) {
-        return undefined;
-      }
-      parts.pop();
-      continue;
-    }
-    parts.push(part);
-  }
-  if (parts.length === 0) {
-    return undefined;
-  }
-  return parts.join("/");
 }
 
 function isWindowsAbsolute(path: string): boolean {

@@ -1,21 +1,26 @@
 import { EditorView, WidgetType } from "@codemirror/view";
 import { codeCard } from "./codeCard";
+import type { MarkdownFeatures } from "./features";
 import { graphicSelection } from "./graphicNav";
 import type { CellNode } from "./tableCells";
 import {
   sourcePosFromCodeClick,
   sourcePosFromTablePoint,
 } from "./visualPos";
+import { bindLinkFollow, followHrefAt, linkElement } from "./widgetLinks";
 
 /**
- * Renders a GFM table as a real HTML table. In Edit a click opens the source.
+ * Renders a GFM table as a real HTML table. In Edit a click opens the source;
+ * links follow on Cmd/Ctrl-click. `features` are the ones the cells were
+ * rendered with, so clicks map back onto the right source offset.
  */
 export class TableWidget extends WidgetType {
   constructor(
     readonly header: CellNode[][],
     readonly rows: CellNode[][][],
-    readonly cellPositions: Array<Array<{ from: number; to: number }>> = [],
-    readonly opensSource = false,
+    readonly cellPositions: Array<Array<{ from: number; to: number }>>,
+    readonly opensSource: boolean,
+    readonly features: MarkdownFeatures,
   ) {
     super();
   }
@@ -23,6 +28,7 @@ export class TableWidget extends WidgetType {
   eq(other: TableWidget): boolean {
     return (
       this.opensSource === other.opensSource &&
+      this.features === other.features &&
       JSON.stringify(this.header) === JSON.stringify(other.header) &&
       JSON.stringify(this.rows) === JSON.stringify(other.rows) &&
       JSON.stringify(this.cellPositions) === JSON.stringify(other.cellPositions)
@@ -45,6 +51,7 @@ export class TableWidget extends WidgetType {
     });
     table.append(tbody);
     wrap.append(table);
+    bindLinkFollow(wrap);
     if (this.opensSource) {
       bindOpenSource(wrap, view, (event) => {
         return (
@@ -53,6 +60,7 @@ export class TableWidget extends WidgetType {
             wrap,
             event.clientX,
             event.clientY,
+            this.features,
           ) ?? view.posAtDOM(wrap)
         );
       });
@@ -172,7 +180,8 @@ export class HrWidget extends WidgetType {
 }
 
 /**
- * Renders a blockquote or Obsidian callout without `>` marks.
+ * Renders a blockquote or Obsidian callout without `>` marks; callout links
+ * follow on Cmd/Ctrl-click.
  */
 export class QuoteWidget extends WidgetType {
   constructor(
@@ -246,16 +255,21 @@ function calloutDom(
     }
   }
   wrap.append(body);
+  bindLinkFollow(wrap);
   return wrap;
 }
 
+/**
+ * Opens the widget's source at the clicked position on a primary mousedown.
+ * A link-follow gesture is left to the link's click handler instead.
+ */
 function bindOpenSource(
   wrap: HTMLElement,
   view: EditorView,
   resolvePos: (event: MouseEvent) => number,
 ): void {
   wrap.addEventListener("mousedown", (event) => {
-    if (event.button !== 0) {
+    if (event.button !== 0 || followHrefAt(event) !== undefined) {
       return;
     }
     event.preventDefault();
@@ -321,13 +335,13 @@ function nodeToDom(node: CellNode): Node {
   if (node.kind === "text") {
     return document.createTextNode(node.text);
   }
-  if (node.kind === "wiki" || node.kind === "link") {
-    const el = document.createElement(node.kind === "link" ? "a" : "span");
+  if (node.kind === "link") {
+    return linkElement(node.text, node.href);
+  }
+  if (node.kind === "wiki") {
+    const el = document.createElement("span");
     el.className = "md-wiki";
     el.textContent = node.text;
-    if (node.kind === "link" && node.href) {
-      el.setAttribute("href", node.href);
-    }
     return el;
   }
   if (node.kind === "strong" || node.kind === "em" || node.kind === "code") {

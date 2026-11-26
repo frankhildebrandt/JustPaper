@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indexAfterPage } from "./palette";
+import { activeAfterLoad, indexAfterPage, paletteStatusText } from "./palette";
 
 describe("indexAfterPage", () => {
   it("moves down by a page of items", () => {
@@ -21,5 +21,45 @@ describe("indexAfterPage", () => {
 
   it("always moves at least one item", () => {
     expect(indexAfterPage(0, 4, 1, 0)).toBe(1);
+  });
+});
+
+describe("activeAfterLoad", () => {
+  it("resets to the first item when the query changed", () => {
+    expect(activeAfterLoad(4, 10, true)).toBe(0);
+  });
+
+  it("keeps the selection for the same query, clamped to the list", () => {
+    expect(activeAfterLoad(4, 10, false)).toBe(4);
+    expect(activeAfterLoad(4, 2, false)).toBe(1);
+  });
+
+  it("stays at zero for an empty list", () => {
+    expect(activeAfterLoad(3, 0, false)).toBe(0);
+  });
+});
+
+describe("paletteStatusText", () => {
+  it("reports a failed load in German", () => {
+    expect(paletteStatusText({ itemCount: 0, failed: true })).toBe(
+      "Ergebnisse konnten nicht geladen werden.",
+    );
+  });
+
+  it("shows the empty text when there are no items", () => {
+    expect(
+      paletteStatusText({
+        itemCount: 0,
+        failed: false,
+        emptyText: "Kein Projekt geöffnet",
+      }),
+    ).toBe("Kein Projekt geöffnet");
+  });
+
+  it("shows nothing when items exist or no empty text is set", () => {
+    expect(
+      paletteStatusText({ itemCount: 2, failed: false, emptyText: "leer" }),
+    ).toBeUndefined();
+    expect(paletteStatusText({ itemCount: 0, failed: false })).toBeUndefined();
   });
 });

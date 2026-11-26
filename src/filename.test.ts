@@ -80,3 +80,26 @@ describe("dirname", () => {
     expect(dirname("C:\\vault\\notes.md")).toBe("C:/vault");
   });
 });
+
+describe("renamePath with dotted names", () => {
+  it("appends the current extension when the suffix is a date part", () => {
+    expect(renamePath("/vault/Hello.md", "Meeting 2024.05.01")).toBe(
+      "/vault/Meeting 2024.05.01.md",
+    );
+  });
+
+  it("appends the current extension after an abbreviation with a space", () => {
+    expect(renamePath("/vault/Hello.md", "Dr. Smith")).toBe(
+      "/vault/Dr. Smith.md",
+    );
+  });
+
+  it("appends the current extension after a version number", () => {
+    expect(renamePath("/vault/Hello.typ", "v1.2")).toBe("/vault/v1.2.typ");
+  });
+
+  it("keeps a typed plausible file extension", () => {
+    expect(renamePath("/vault/Hello.md", "notes.txt")).toBe("/vault/notes.txt");
+    expect(renamePath("/vault/Hello.md", "Paper.TYP")).toBe("/vault/Paper.TYP");
+  });
+});

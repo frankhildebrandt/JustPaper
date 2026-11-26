@@ -7,14 +7,12 @@ import {
   StateEffect,
   StateField,
   type SelectionRange,
-  type TransactionSpec,
   type Range,
 } from "@codemirror/state";
 import {
   Decoration,
   Direction,
   EditorView,
-  WidgetType,
   drawSelection,
   keymap,
   type DecorationSet,
@@ -25,7 +23,22 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { addAtxHash, removeAtxHash, type AtxEdit } from "./atxEdit";
 import { decorationSpecs, decorationRevealKey, atomicSyntaxRanges, type DecorationSpec } from "./decorationSpecs";
 import { applyHeadingCssVars } from "./headingStyle";
-import { parseMarkdown, type Block } from "./parse";
+import type { Block } from "./parse";
+import { docSource, markdownBlocks, typstBlocks } from "./parsedDoc";
+import {
+  loadDocument,
+  replaceDocumentWithFreshHistory,
+} from "./documentLoad";
+import { goalColumnField } from "./goalColumn";
+import { caretMoveSpec, logicalDirection } from "./caretMove";
+import { onGestureEnd } from "./pointerGestureEnd";
+import { todoToggleOnLine } from "./todoToggle";
+import {
+  GlyphWidget,
+  ImageWidget,
+  LinebreakWidget,
+  TodoWidget,
+} from "./inlineWidgets";
 import {
   typstAtomicSyntaxRanges,
   typstDecorationRevealKey,
@@ -37,7 +50,7 @@ import {
   type HeadingEdit,
 } from "../typst/headingEdit";
 import { typstIncludeAt } from "../typst/includes";
-import { parseTypst, typstLinkAt } from "../typst/parse";
+import { typstLinkAt } from "../typst/parse";
 import { CodeWidget, HrWidget, QuoteWidget, TableWidget } from "./graphicWidgets";
 import {
   caretRevealsTable,
@@ -74,7 +87,6 @@ import { wikiLinkAt } from "../wikiLink";
 import { externalLinkAt } from "./parseLink";
 import { openExternalUrl } from "./openExternalUrl";
 import { resolveImageSrc } from "./imageSrc";
-import { toggleTodoCheck } from "./parseTodo";
 import { allowCaretReveal, selectionLockHolds } from "./revealTiming";
 import {
   pointerRangeAt,
@@ -83,16 +95,19 @@ import {
   type VisualRowHit,
 } from "./pointerSelection";
 
-/** Last known caret screen x so blank lines do not reset the visual column. */
-let lastCaretScreenX: number | undefined;
-
 export type PaperLanguage = "markdown" | "typst";
 export type PaperSurface = "edit" | "view";
 const setShowMarks = StateEffect.define<boolean>();
 const setHighlightModeEffect = StateEffect.define<HighlightMode>();
 const setFeaturesEffect = StateEffect.define<MarkdownFeatures>();
 const setTypstFeaturesEffect = StateEffect.define<TypstFeatures>();
-const setAssetBaseEffect = StateEffect.define<string | null>();
+/**
+ * Folders that relative and project-absolute (`/…`) asset paths resolve against.
+ */
+type AssetBase = { dir: string | null; projectRoot: string | null };
+
+const NO_ASSET_BASE: AssetBase = { dir: null, projectRoot: null };
+const setAssetBaseEffect = StateEffect.define<AssetBase>();
 const setGraphicEffect = StateEffect.define<boolean>();
 const setLanguageEffect = StateEffect.define<PaperLanguage>();
 const setPointerSelecting = StateEffect.define<boolean>();
@@ -148,9 +163,9 @@ const typstFeaturesField = StateField.define<TypstFeatures>({
   },
 });
 
-const assetBaseField = StateField.define<string | null>({
-  create: () => null,
-  update(value, transaction): string | null {
+const assetBaseField = StateField.define<AssetBase>({
+  create: () => NO_ASSET_BASE,
+  update(value, transaction): AssetBase {
     for (const effect of transaction.effects) {
       if (effect.is(setAssetBaseEffect)) {
         return effect.value;
@@ -186,25 +201,10 @@ const languageField = StateField.define<PaperLanguage>({
 
 const markdownDecorations = StateField.define<DecorationSet>({
   create(state): DecorationSet {
-    return decorationsFor(
-      state.doc.toString(),
-      state.field(showMarksField),
-      state.field(featuresField),
-      state.field(typstFeaturesField),
-      state.field(assetBaseField),
-      state.field(graphicField),
-      state.field(languageField),
-      state.selection.main.head,
-    );
+    return decorationsFor(state);
   },
   update(current, transaction): DecorationSet {
-    const showMarks = transaction.state.field(showMarksField);
-    const features = transaction.state.field(featuresField);
-    const typstFeatures = transaction.state.field(typstFeaturesField);
-    const assetBase = transaction.state.field(assetBaseField);
-    const graphic = transaction.state.field(graphicField);
-    const language = transaction.state.field(languageField);
-    const caret = transaction.state.selection.main.head;
+    const state = transaction.state;
     if (
       transaction.docChanged ||
       transaction.effects.some(
@@ -217,71 +217,24 @@ const markdownDecorations = StateField.define<DecorationSet>({
           effect.is(setLanguageEffect),
       )
     ) {
-      return decorationsFor(
-        transaction.state.doc.toString(),
-        showMarks,
-        features,
-        typstFeatures,
-        assetBase,
-        graphic,
-        language,
-        caret,
-      );
+      return decorationsFor(state);
     }
     const pointerSelectingEnded = transaction.effects.some(
       (effect) => effect.is(setPointerSelecting) && effect.value === false,
     );
     if (pointerSelectingEnded) {
-      return decorationsFor(
-        transaction.state.doc.toString(),
-        showMarks,
-        features,
-        typstFeatures,
-        assetBase,
-        graphic,
-        language,
-        caret,
-      );
+      return decorationsFor(state);
     }
     if (
       allowCaretReveal(
-        showMarks,
-        transaction.state.field(pointerSelectingField),
+        state.field(showMarksField),
+        state.field(pointerSelectingField),
       ) &&
-      transaction.selection
+      transaction.selection &&
+      revealKey(state, state.selection.main.head) !==
+        revealKey(state, transaction.startState.selection.main.head)
     ) {
-      const source = transaction.state.doc.toString();
-      if (
-        revealKey(
-          source,
-          language,
-          features,
-          typstFeatures,
-          showMarks,
-          graphic,
-          caret,
-        ) !==
-        revealKey(
-          source,
-          language,
-          features,
-          typstFeatures,
-          showMarks,
-          graphic,
-          transaction.startState.selection.main.head,
-        )
-      ) {
-        return decorationsFor(
-          source,
-          showMarks,
-          features,
-          typstFeatures,
-          assetBase,
-          graphic,
-          language,
-          caret,
-        );
-      }
+      return decorationsFor(state);
     }
     return current.map(transaction.changes);
   },
@@ -443,7 +396,7 @@ export type MarkdownEditor = {
   setHighlightMode: (mode: HighlightMode) => void;
   setFeatures: (features: MarkdownFeatures) => void;
   setTypstFeatures: (features: TypstFeatures) => void;
-  setAssetBase: (dir: string | null) => void;
+  setAssetBase: (dir: string | null, projectRoot?: string | null) => void;
   setGraphic: (enabled: boolean) => void;
   setLinkHelperKeys: (handler: ((key: string) => boolean) | undefined) => void;
   layoutElement: HTMLElement;
@@ -454,31 +407,6 @@ export type MarkdownEditor = {
   focus: () => void;
   destroy: () => void;
 };
-
-type HistoryResetTarget = {
-  readonly state: EditorState;
-  dispatch: (spec: TransactionSpec) => void;
-};
-
-/**
- * Replaces the complete buffer while dropping history from the previous
- * document. Removing and re-adding the compartment is intentional: marking
- * the replacement as non-historical would still map old undo entries through
- * the new document and can splice unrelated file contents together.
- */
-export function replaceDocumentWithFreshHistory(
-  target: HistoryResetTarget,
-  historyCompartment: Compartment,
-  text: string,
-  caret?: number,
-): void {
-  target.dispatch({
-    changes: { from: 0, to: target.state.doc.length, insert: text },
-    selection: caret === undefined ? undefined : { anchor: caret },
-    effects: historyCompartment.reconfigure([]),
-  });
-  target.dispatch({ effects: historyCompartment.reconfigure(history()) });
-}
 
 /**
  * Mounts a CodeMirror editor that styles markdown from our parser.
@@ -494,7 +422,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
   let linkHelperKeys: ((key: string) => boolean) | undefined;
 
   const followAt = (current: EditorView, offset: number): boolean => {
-    const source = current.state.doc.toString();
+    const source = docSource(current.state.doc);
     const language = current.state.field(languageField);
     if (language === "typst") {
       const features = current.state.field(typstFeaturesField);
@@ -543,6 +471,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         assetBaseField,
         graphicField,
         languageField,
+        goalColumnField,
         markdownDecorations,
         highlightModeField,
         highlightDecorations,
@@ -556,6 +485,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
             run: (current) =>
               followAt(current, current.state.selection.main.head),
           },
+          { key: "Mod-Enter", run: toggleTodoAtCaret },
           ...defaultKeymap,
           ...historyKeymap,
         ]),
@@ -563,7 +493,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         EditorView.lineWrapping,
         EditorState.tabSize.of(4),
         EditorView.contentAttributes.of({ spellcheck: "false" }),
-        editable.of(EditorView.editable.of(true)),
+        editable.of(surfaceEditability(true)),
         paperTheme,
         EditorView.mouseSelectionStyle.of(paperMouseSelectionStyle),
         EditorView.domEventHandlers({
@@ -591,7 +521,6 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
             for (const listener of caretListeners) {
               listener();
             }
-            rememberCaretScreenX(update.view);
           }
         }),
       ],
@@ -655,15 +584,8 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     document.removeEventListener("selectionchange", onNativeSelectionDrift);
     view.dispatch({ effects: setPointerSelecting.of(true) });
 
-    const clearEndListeners = (): void => {
-      window.removeEventListener("mouseup", endSelect, true);
-      window.removeEventListener("blur", endSelect);
-      if (cancelPointerEnd === clearEndListeners) {
-        cancelPointerEnd = null;
-      }
-    };
     const endSelect = (): void => {
-      clearEndListeners();
+      cancelPointerEnd = null;
       const finish = (): void => {
         if (gesture !== pointerGesture) {
           return;
@@ -697,9 +619,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
       });
     };
     cancelPointerEnd?.();
-    cancelPointerEnd = clearEndListeners;
-    window.addEventListener("mouseup", endSelect, true);
-    window.addEventListener("blur", endSelect);
+    cancelPointerEnd = onGestureEnd(window, endSelect);
   };
   view.contentDOM.addEventListener("mousedown", onPointerSelectStart, true);
   const onLinkHelperKeyDown = (event: KeyboardEvent): void => {
@@ -734,7 +654,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
   };
 
   return {
-    getDocument: () => view.state.doc.toString(),
+    getDocument: () => docSource(view.state.doc),
     setDocument: (
       text: string,
       caretLine?: number,
@@ -748,13 +668,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
         replaceDocumentWithFreshHistory(view, undoHistory, text, caret);
         return;
       }
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: text },
-        selection:
-          caret === undefined
-            ? undefined
-            : { anchor: Math.min(caret, text.length) },
-      });
+      loadDocument(view, text, caret);
     },
     getCaretOffset: () => view.state.selection.main.head,
     setCaretOffset: (offset: number): void => {
@@ -793,7 +707,7 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
       const showMarks = surface === "edit";
       view.dispatch({
         effects: [
-          editable.reconfigure(EditorView.editable.of(showMarks)),
+          editable.reconfigure(surfaceEditability(showMarks)),
           setShowMarks.of(showMarks),
         ],
       });
@@ -810,8 +724,8 @@ export function bindMarkdownEditor(parent: HTMLElement): MarkdownEditor {
     setTypstFeatures: (features: TypstFeatures): void => {
       view.dispatch({ effects: setTypstFeaturesEffect.of(features) });
     },
-    setAssetBase: (dir: string | null): void => {
-      view.dispatch({ effects: setAssetBaseEffect.of(dir) });
+    setAssetBase: (dir: string | null, projectRoot: string | null = null): void => {
+      view.dispatch({ effects: setAssetBaseEffect.of({ dir, projectRoot }) });
     },
     setGraphic: (enabled: boolean): void => {
       view.dispatch({ effects: setGraphicEffect.of(enabled) });
@@ -1038,35 +952,46 @@ function pointerPoint(
   return { pos, bias };
 }
 
+const atomicRangeCache = new WeakMap<EditorState, DecorationSet>();
+
+/**
+ * Makes hidden syntax (ATX prefix, todo box, hidden marks) atomic for caret
+ * motion; computed once per editor state from the shared parse cache.
+ */
 function headingPrefixAtoms() {
   return EditorView.atomicRanges.of((view) => {
-    const source = view.state.doc.toString();
-    const language = view.state.field(languageField);
-    const showMarks = view.state.field(showMarksField);
-    const caret = view.state.selection.main.head;
-    const ranges =
-      language === "typst"
-        ? typstAtomicSyntaxRanges(
-            parseTypst(source, view.state.field(typstFeaturesField)),
-            {
-              showMarks,
-              caret,
-              source,
-            },
-          )
-        : atomicSyntaxRanges(parseMarkdown(source, view.state.field(featuresField)), {
-            showMarks,
-            graphic: view.state.field(graphicField),
-            source,
-            caret,
-          });
-    return Decoration.set(
-      ranges
-        .filter((range) => range.to > range.from)
-        .map((range) => Decoration.mark({}).range(range.from, range.to)),
-      true,
-    );
+    const state = view.state;
+    let ranges = atomicRangeCache.get(state);
+    if (!ranges) {
+      ranges = atomicRangesFor(state);
+      atomicRangeCache.set(state, ranges);
+    }
+    return ranges;
   });
+}
+
+function atomicRangesFor(state: EditorState): DecorationSet {
+  const source = docSource(state.doc);
+  const showMarks = state.field(showMarksField);
+  const caret = state.selection.main.head;
+  const ranges =
+    state.field(languageField) === "typst"
+      ? typstAtomicSyntaxRanges(
+          typstBlocks(state.doc, state.field(typstFeaturesField)),
+          { showMarks, caret, source },
+        )
+      : atomicSyntaxRanges(markdownBlocks(state.doc, state.field(featuresField)), {
+          showMarks,
+          graphic: state.field(graphicField),
+          source,
+          caret,
+        });
+  return Decoration.set(
+    ranges
+      .filter((range) => range.to > range.from)
+      .map((range) => Decoration.mark({}).range(range.from, range.to)),
+    true,
+  );
 }
 
 function headingKeymap() {
@@ -1076,7 +1001,7 @@ function headingKeymap() {
         key: "#",
         run: (view) =>
           view.state.field(languageField) === "markdown" &&
-          applyAtxEdit(view, (doc, pos) => addAtxHash(doc, pos)),
+          applyAtxEdit(view, addAtxHash),
       },
       {
         key: "=",
@@ -1094,7 +1019,7 @@ function headingKeymap() {
             );
           }
           if (language === "markdown") {
-            return applyAtxEdit(view, (doc, pos) => removeAtxHash(doc, pos));
+            return applyAtxEdit(view, removeAtxHash);
           }
           return false;
         },
@@ -1128,7 +1053,9 @@ function graphicNavKeymap() {
 
 /**
  * Arrow motion: enter graphic widgets when needed, otherwise move by visual row
- * (soft wrap) / character — same geometry as click positioning.
+ * (soft wrap) / character — same geometry as click positioning. Vertical moves
+ * keep a goal column across consecutive presses; horizontal moves follow the
+ * text direction at the caret. The moved caret is scrolled into view.
  */
 function enterGraphic(
   view: EditorView,
@@ -1138,31 +1065,40 @@ function enterGraphic(
   if (!view.state.selection.main.empty) {
     return false;
   }
-  const source = view.state.doc.toString();
-  const graphic = view.state.field(graphicField);
-  const showMarks = view.state.field(showMarksField);
-  const features = view.state.field(featuresField);
-  const language = view.state.field(languageField);
+  const state = view.state;
+  const source = docSource(state.doc);
+  const graphic = state.field(graphicField);
+  const showMarks = state.field(showMarksField);
   const blocks =
-    language === "markdown" ? parseMarkdown(source, features) : [];
+    state.field(languageField) === "markdown"
+      ? markdownBlocks(state.doc, state.field(featuresField))
+      : [];
   const spans = graphic && showMarks ? graphicSpans(blocks) : [];
-  const caret = view.state.selection.main.head;
+  const caret = state.selection.main.head;
+  const goalX =
+    axis === "along"
+      ? (state.field(goalColumnField) ?? caretScreenX(view, caret))
+      : undefined;
+  const step =
+    axis === "across"
+      ? logicalDirection(direction, view.textDirectionAt(caret) === Direction.RTL)
+      : direction;
 
   let next: number | undefined =
     spans.length === 0
       ? undefined
       : axis === "along"
-        ? enterGraphicAlong(source, spans, caret, direction)
-        : enterGraphicAcross(source, spans, caret, direction);
+        ? enterGraphicAlong(source, spans, caret, step)
+        : enterGraphicAcross(source, spans, caret, step);
 
   if (next === undefined && axis === "along") {
-    next = moveVisualLine(view, direction) ?? undefined;
+    next = moveVisualLine(view, step, goalX) ?? undefined;
     if (isVisualLineStep(caret, next) && spans.length > 0) {
       next = caretSkippedGraphic(source, spans, caret, next) ?? next;
     }
   }
   if (next === undefined && axis === "across") {
-    const moved = view.moveByChar(view.state.selection.main, direction === 1);
+    const moved = view.moveByChar(state.selection.main, step === 1);
     next = moved.head;
     if (spans.length > 0) {
       next = caretSkippedGraphic(source, spans, caret, next) ?? next;
@@ -1187,22 +1123,33 @@ function enterGraphic(
       span,
       next,
       caret,
-      direction,
+      goalX,
+      step,
       axis,
     );
   }
-  view.dispatch({ selection: { anchor: next } });
+  view.dispatch(caretMoveSpec(next, goalX));
   return true;
 }
 
 /**
- * Moves one soft-wrapped visual row, preserving screen column.
+ * Screen x of the caret at `pos` (falling back to the previous character).
+ */
+function caretScreenX(view: EditorView, pos: number): number | undefined {
+  const coords =
+    view.coordsAtPos(pos) ?? (pos > 0 ? view.coordsAtPos(pos - 1) : null);
+  return coords && Number.isFinite(coords.left) ? coords.left : undefined;
+}
+
+/**
+ * Moves one soft-wrapped visual row, aiming for the goal column `goalX`
+ * (the caret's own x when no goal is known).
  */
 function moveVisualLine(
   view: EditorView,
   direction: 1 | -1,
+  goalX: number | undefined,
 ): number | null {
-  rememberCaretScreenX(view);
   const caret = view.state.selection.main.head;
   let box = view.coordsAtPos(caret);
   if (!box || !Number.isFinite(box.left)) {
@@ -1211,7 +1158,7 @@ function moveVisualLine(
   if (!box || !Number.isFinite(box.left)) {
     return view.moveVertically(view.state.selection.main, direction === 1).head;
   }
-  const x = lastCaretScreenX ?? box.left;
+  const x = goalX ?? box.left;
   const y = visualLineProbeY(box, direction);
   const probed = posAtClick(view, x, y);
   if (probed !== null && probed !== caret) {
@@ -1221,7 +1168,8 @@ function moveVisualLine(
 }
 
 /**
- * Maps arrow-enter onto the rendered widget at the caret's visual column.
+ * Maps arrow-enter onto the rendered widget at the goal column (or the
+ * caret's own x for horizontal moves).
  */
 function refineGraphicEnter(
   view: EditorView,
@@ -1229,6 +1177,7 @@ function refineGraphicEnter(
   span: GraphicSpan,
   fallback: number,
   caret: number,
+  goalX: number | undefined,
   direction: 1 | -1,
   axis: "along" | "across",
 ): number {
@@ -1236,7 +1185,6 @@ function refineGraphicEnter(
   if (!widget) {
     return fallback;
   }
-  rememberCaretScreenX(view);
   let caretCoords = view.coordsAtPos(caret);
   if (
     (!caretCoords || !Number.isFinite(caretCoords.left)) &&
@@ -1245,7 +1193,7 @@ function refineGraphicEnter(
     caretCoords = view.coordsAtPos(caret - 1);
   }
   const left =
-    lastCaretScreenX ??
+    goalX ??
     (caretCoords && Number.isFinite(caretCoords.left)
       ? caretCoords.left
       : undefined);
@@ -1270,6 +1218,7 @@ function refineGraphicEnter(
         widget,
         point.x,
         point.y,
+        view.state.field(featuresField),
       ) ?? fallback
     );
   }
@@ -1290,22 +1239,6 @@ function refineGraphicEnter(
     }
   }
   return fallback;
-}
-
-/**
- * Remembers caret screen x while the caret sits on a non-blank line.
- */
-function rememberCaretScreenX(view: EditorView): void {
-  const caret = view.state.selection.main.head;
-  const line = view.state.doc.lineAt(caret);
-  if (line.text.trim().length === 0) {
-    return;
-  }
-  const coords =
-    view.coordsAtPos(caret) ?? view.coordsAtPos(Math.max(0, caret - 1));
-  if (coords && Number.isFinite(coords.left)) {
-    lastCaretScreenX = coords.left;
-  }
 }
 
 /**
@@ -1488,9 +1421,41 @@ function graphicSpans(blocks: Block[]): GraphicSpan[] {
   return spans;
 }
 
+/**
+ * Edit surface is editable; View is read-only, so neither input nor commands
+ * (keymaps, widget clicks) mutate the document there.
+ */
+function surfaceEditability(editable: boolean) {
+  return [
+    EditorView.editable.of(editable),
+    EditorState.readOnly.of(!editable),
+  ];
+}
+
+/**
+ * Toggles the task box on the caret line (markdown, todos enabled, editable).
+ */
+function toggleTodoAtCaret(view: EditorView): boolean {
+  const state = view.state;
+  if (
+    state.readOnly ||
+    state.field(languageField) !== "markdown" ||
+    !state.field(featuresField).todo
+  ) {
+    return false;
+  }
+  const line = state.doc.lineAt(state.selection.main.head);
+  const toggle = todoToggleOnLine(docSource(state.doc), line.from, line.to);
+  if (!toggle) {
+    return false;
+  }
+  view.dispatch({ changes: toggle });
+  return true;
+}
+
 function applyAtxEdit(
   view: EditorView,
-  edit: (doc: string, pos: number) => AtxEdit | undefined,
+  edit: (doc: string, pos: number, blocks: Block[]) => AtxEdit | undefined,
 ): boolean {
   if (!view.state.facet(EditorView.editable)) {
     return false;
@@ -1502,7 +1467,12 @@ function applyAtxEdit(
   if (!selection.empty) {
     return false;
   }
-  const next = edit(view.state.doc.toString(), selection.head);
+  const state = view.state;
+  const next = edit(
+    docSource(state.doc),
+    selection.head,
+    markdownBlocks(state.doc, state.field(featuresField)),
+  );
   if (!next) {
     return false;
   }
@@ -1527,7 +1497,7 @@ function applyHeadingEdit(
   if (!selection.empty) {
     return false;
   }
-  const next = edit(view.state.doc.toString(), selection.head);
+  const next = edit(docSource(view.state.doc), selection.head);
   if (!next) {
     return false;
   }
@@ -1540,7 +1510,7 @@ function applyHeadingEdit(
 
 function decorationsForHighlight(state: EditorState): DecorationSet {
   const ranges = dimRanges(
-    state.doc.toString(),
+    docSource(state.doc),
     state.selection.main.head,
     state.field(highlightModeField),
     state.field(languageField),
@@ -1554,66 +1524,71 @@ function decorationsForHighlight(state: EditorState): DecorationSet {
   );
 }
 
-function revealKey(
-  source: string,
-  language: PaperLanguage,
-  features: MarkdownFeatures,
-  typstFeatures: TypstFeatures,
-  showMarks: boolean,
-  graphic: boolean,
-  caret: number,
-): string {
-  if (language === "typst") {
-    return typstDecorationRevealKey(parseTypst(source, typstFeatures), {
-      showMarks,
-      caret,
-      source,
-    });
+/**
+ * Fingerprint of the marks/widgets revealed for `caret` in `state`'s document.
+ */
+function revealKey(state: EditorState, caret: number): string {
+  const source = docSource(state.doc);
+  const showMarks = state.field(showMarksField);
+  if (state.field(languageField) === "typst") {
+    return typstDecorationRevealKey(
+      typstBlocks(state.doc, state.field(typstFeaturesField)),
+      { showMarks, caret, source },
+    );
   }
-  return decorationRevealKey(parseMarkdown(source, features), {
-    showMarks,
-    graphic,
-    source,
-    caret,
-  });
+  return decorationRevealKey(
+    markdownBlocks(state.doc, state.field(featuresField)),
+    { showMarks, graphic: state.field(graphicField), source, caret },
+  );
 }
 
-function decorationsFor(
-  source: string,
-  showMarks: boolean,
-  features: MarkdownFeatures,
-  typstFeatures: TypstFeatures,
-  assetBase: string | null,
-  graphic: boolean,
-  language: PaperLanguage,
-  caret: number,
-): DecorationSet {
+/**
+ * Builds the syntax decorations for `state` from the shared parse cache.
+ */
+function decorationsFor(state: EditorState): DecorationSet {
+  const source = docSource(state.doc);
+  const showMarks = state.field(showMarksField);
+  const features = state.field(featuresField);
+  const caret = state.selection.main.head;
+  const assetBase = state.field(assetBaseField);
   const specs =
-    language === "typst"
-      ? typstDecorationSpecs(parseTypst(source, typstFeatures), {
+    state.field(languageField) === "typst"
+      ? typstDecorationSpecs(
+          typstBlocks(state.doc, state.field(typstFeaturesField)),
+          {
+            showMarks,
+            caret,
+            source,
+            projectRoot: assetBase.projectRoot ?? undefined,
+          },
+        )
+      : decorationSpecs(markdownBlocks(state.doc, features), {
           showMarks,
-          caret,
-          source,
-        })
-      : decorationSpecs(parseMarkdown(source, features), {
-          showMarks,
-          graphic,
+          graphic: state.field(graphicField),
           source,
           caret,
           features,
         });
+  const context: WidgetContext = {
+    assetBase: assetBase.dir,
+    features,
+    editable: showMarks,
+  };
   return Decoration.set(
-    specs.flatMap((spec) =>
-      specToRanges(spec, assetBase, features.externalImage),
-    ),
+    specs.flatMap((spec) => specToRanges(spec, context)),
     true,
   );
 }
 
+type WidgetContext = {
+  assetBase: string | null;
+  features: MarkdownFeatures;
+  editable: boolean;
+};
+
 function specToRanges(
   spec: DecorationSpec,
-  assetBase: string | null,
-  allowExternal: boolean,
+  context: WidgetContext,
 ): Range<Decoration>[] {
   if (spec.kind.startsWith("line-h")) {
     const className = `md-h${spec.kind.slice("line-h".length)}`;
@@ -1644,7 +1619,7 @@ function specToRanges(
   if (spec.kind === "todo-widget") {
     return [
       Decoration.replace({
-        widget: new TodoWidget(spec.checked === true),
+        widget: new TodoWidget(spec.checked === true, context.editable),
       }).range(spec.from, spec.to),
     ];
   }
@@ -1652,7 +1627,11 @@ function specToRanges(
     return [
       Decoration.replace({
         widget: new ImageWidget(
-          displayImageSrc(spec.href ?? "", assetBase, allowExternal),
+          displayImageSrc(
+            spec.href ?? "",
+            context.assetBase,
+            context.features.externalImage,
+          ),
           spec.alt ?? "",
         ),
       }).range(spec.from, spec.to),
@@ -1666,6 +1645,7 @@ function specToRanges(
           spec.rows ?? [],
           spec.cellPositions ?? [],
           spec.opensSource === true,
+          context.features,
         ),
         block: true,
       }).range(spec.from, spec.to),
@@ -1731,114 +1711,6 @@ function specToRanges(
   return [
     Decoration.mark({ class: `md-${spec.kind}` }).range(spec.from, spec.to),
   ];
-}
-
-class LinebreakWidget extends WidgetType {
-  eq(): boolean {
-    return true;
-  }
-
-  toDOM(): HTMLElement {
-    const breakEl = document.createElement("br");
-    breakEl.className = "md-linebreak";
-    return breakEl;
-  }
-}
-
-class GlyphWidget extends WidgetType {
-  constructor(readonly glyph: string) {
-    super();
-  }
-
-  eq(other: GlyphWidget): boolean {
-    return this.glyph === other.glyph;
-  }
-
-  toDOM(): HTMLElement {
-    const el = document.createElement("span");
-    el.className = "md-glyph";
-    el.textContent = this.glyph;
-    return el;
-  }
-}
-
-class TodoWidget extends WidgetType {
-  constructor(readonly checked: boolean) {
-    super();
-  }
-
-  eq(other: TodoWidget): boolean {
-    return this.checked === other.checked;
-  }
-
-  toDOM(view: EditorView): HTMLElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = this.checked
-      ? "md-todo-box is-checked"
-      : "md-todo-box";
-    button.setAttribute("role", "checkbox");
-    button.setAttribute("aria-checked", this.checked ? "true" : "false");
-    button.setAttribute("aria-label", this.checked ? "Erledigt" : "Offen");
-    button.innerHTML =
-      '<svg class="md-todo-tick" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.2 6.2 4.8 8.8 9.8 3.2"/></svg>';
-    const toggle = (event: Event): void => {
-      event.preventDefault();
-      event.stopPropagation();
-      const pos = view.posAtDOM(button);
-      const next = toggleTodoCheck(view.state.doc.toString(), pos);
-      if (!next) {
-        return;
-      }
-      view.dispatch({
-        changes: { from: next.from, to: next.to, insert: next.insert },
-      });
-    };
-    button.addEventListener("mousedown", toggle);
-    return button;
-  }
-
-  ignoreEvent(event: Event): boolean {
-    return event.type !== "mousedown" && event.type !== "click";
-  }
-}
-
-class ImageWidget extends WidgetType {
-  constructor(
-    readonly src: string | undefined,
-    readonly alt: string,
-  ) {
-    super();
-  }
-
-  eq(other: ImageWidget): boolean {
-    return this.src === other.src && this.alt === other.alt;
-  }
-
-  toDOM(): HTMLElement {
-    if (!this.src) {
-      return imageFallback(this.alt);
-    }
-    const img = document.createElement("img");
-    img.className = "md-image-widget";
-    img.alt = this.alt;
-    img.src = this.src;
-    img.addEventListener("error", () => {
-      img.replaceWith(imageFallback(this.alt));
-    });
-    return img;
-  }
-
-  ignoreEvent(): boolean {
-    return false;
-  }
-}
-
-function imageFallback(alt: string): HTMLElement {
-  const fallback = document.createElement("span");
-  fallback.className = "md-image-fallback";
-  fallback.textContent = alt || "image";
-  return fallback;
 }
 
 function displayImageSrc(

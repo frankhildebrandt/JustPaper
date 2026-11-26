@@ -1,4 +1,5 @@
 import { displayOffsetFromPoint, sourcePosFromCellClick } from "./cellClick";
+import type { MarkdownFeatures } from "./features";
 
 export type GlyphBox = {
   left: number;
@@ -397,12 +398,14 @@ export function sourcePosFromCodeClick(
 
 /**
  * Source offset for a point inside a graphic table widget.
+ * `features` must be the ones the table cells were rendered with.
  */
 export function sourcePosFromTablePoint(
   viewDocSlice: (from: number, to: number) => string,
   wrap: HTMLElement,
   clientX: number,
   clientY: number,
+  features: MarkdownFeatures,
 ): number | undefined {
   const hit =
     (
@@ -422,6 +425,7 @@ export function sourcePosFromTablePoint(
     hit,
     clientX,
     clientY,
+    features,
   );
 }
 

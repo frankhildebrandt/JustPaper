@@ -149,3 +149,29 @@ describe("activeParagraphIndex", () => {
     expect(activeParagraphIndex("one\n\ntwo", 3)).toBe(0);
   });
 });
+
+describe("sentence focus terminators", () => {
+  it("ends sentences at question and exclamation marks", () => {
+    expect(focusRange("Wer? Ich! Gut.", 6, "sentence")).toEqual({
+      from: 5,
+      to: 10,
+    });
+  });
+
+  it("ends a sentence at an ellipsis", () => {
+    expect(focusRange("Also\u2026 weiter.", 8, "sentence")).toEqual({
+      from: 6,
+      to: 13,
+    });
+  });
+
+  it("does not split after common German abbreviations", () => {
+    const source = "Etwa z. B. Obst, d. h. Äpfel bzw. Birnen. Dann mehr.";
+    expect(focusRange(source, 20, "sentence")).toEqual({ from: 0, to: 42 });
+  });
+
+  it("does not split after titles and numbers", () => {
+    const source = "Dr. Meier sah Nr. 5 auf S. 3. Ende.";
+    expect(focusRange(source, 1, "sentence")).toEqual({ from: 0, to: 30 });
+  });
+});
